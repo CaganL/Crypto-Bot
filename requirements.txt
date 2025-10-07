@@ -7,3 +7,4 @@ feedparser
 schedule
 praw
 tweepy
+python-dotenv
