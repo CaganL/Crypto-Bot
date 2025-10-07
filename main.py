@@ -40,13 +40,10 @@ coin_aliases = {
 # Telegram Mesaj Fonksiyonu
 # -------------------------------
 def send_telegram_message(message):
-    if bot:
-        try:
-            bot.send_message(chat_id=CHAT_ID, text=message)
-        except Exception as e:
-            print("Telegram gönderim hatası:", e)
-    else:
-        print("Telegram ayarları eksik veya bot başlatılmamış!")
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=message)
+    except Exception as e:
+        print("Telegram gönderim hatası:", e)
 
 # -------------------------------
 # Binance Fiyat Verisi
@@ -93,7 +90,7 @@ def fetch_and_analyze(symbol="BTCUSDT"):
     prev_close = df['close'].iloc[-2]
     price_change_pct = ((last_close - prev_close)/prev_close)*100
     indicators['price_change'] = price_change_pct
-    return indicators
+    return indicators, last_close
 
 # -------------------------------
 # CoinGlass API
@@ -130,7 +127,7 @@ def fetch_news():
         return []
 
 # -------------------------------
-# AI Tahmin
+# AI Öğrenme Sistemi
 # -------------------------------
 history_file = "history.json"
 
@@ -147,6 +144,7 @@ def save_history(history):
 def ai_position_prediction(symbol, indicators, cg_data=None):
     history = load_history()
     score = 0
+
     # RSI
     if indicators['rsi'] < 30:
         score += 1
@@ -168,7 +166,7 @@ def ai_position_prediction(symbol, indicators, cg_data=None):
             score += 1
         elif cg_data["short_ratio"] > 0.6:
             score -= 1
-    # Geçmiş öğrenimi: son tahminle uyuşursa güveni artır
+    # Geçmiş öğrenimi
     last_pos = history.get(symbol, {}).get("last_position")
     if last_pos == "Long" and score > 0:
         score += 0.5
@@ -181,24 +179,41 @@ def ai_position_prediction(symbol, indicators, cg_data=None):
         position = "Short"
     else:
         position = "Neutral"
+
     confidence = min(max((score + 3)/6, 0), 1)*100
-    # Geçmişi kaydet
     history[symbol] = {"last_position": position}
     save_history(history)
     return position, confidence
 
 # -------------------------------
-# Telegram Mesaj Gönder
+# Ani Fiyat Dalgalanma Uyarısı (%5)
+# -------------------------------
+last_prices = {}
+
+def check_price_spike(symbol, current_price):
+    global last_prices
+    if symbol in last_prices:
+        old_price = last_prices[symbol]
+        change_pct = ((current_price - old_price) / old_price) * 100
+        if abs(change_pct) >= 5:
+            direction = "📈 YÜKSELDİ" if change_pct > 0 else "📉 DÜŞTÜ"
+            msg = f"⚠️ {symbol} Fiyat Uyarısı:\nFiyat son kontrolünden beri %{change_pct:.2f} {direction}!\nAnlık Fiyat: {current_price:.2f} USDT"
+            send_telegram_message(msg)
+    last_prices[symbol] = current_price
+
+# -------------------------------
+# Ana Analiz Fonksiyonu
 # -------------------------------
 def analyze_and_alert():
     alerts = []
     for coin in coin_aliases.keys():
-        indicators = fetch_and_analyze(coin)
-        cg_data = fetch_coinglass_data(coin.replace("USDT",""))
+        indicators, current_price = fetch_and_analyze(coin)
+        check_price_spike(coin, current_price)
+        cg_data = fetch_coinglass_data(coin.replace("USDT", ""))
         position, confidence = ai_position_prediction(coin, indicators, cg_data)
 
         msg = f"{coin} Analizi (4s):\n"
-        msg += f"💰 Fiyat: {fetch_binance_klines(coin)['close'].iloc[-1]:.2f} USDT ({indicators['price_change']:+.2f}% son 4 saatte)\n"
+        msg += f"💰 Fiyat: {current_price:.2f} USDT ({indicators['price_change']:+.2f}% son 4 saatte)\n"
         msg += f"📈 RSI: {indicators['rsi']:.1f}\n"
         trend = "🔼 Yukarı" if indicators['ema_short'] > indicators['ema_long'] else "🔽 Aşağı"
         msg += f"📉 EMA12/26 Trend: {trend}\n"
@@ -208,19 +223,21 @@ def analyze_and_alert():
             msg += f"📊 Long/Short Oran: {cg_data['long_ratio']*100:.1f}% / {cg_data['short_ratio']*100:.1f}%\n"
         msg += f"🤖 AI Tahmini: {position}\n"
         msg += f"📊 AI Güven Skoru: {confidence:.0f}%\n"
+
         news = fetch_news()
         if news:
             msg += "\n📰 Son Haberler:\n" + "\n".join(news)
+
         alerts.append(msg)
 
     full_message = "\n\n".join(alerts)
     send_telegram_message(full_message)
 
 # -------------------------------
-# Scheduler - Her 2 Saatte Bir
+# Scheduler
 # -------------------------------
 schedule.every(2).hours.do(analyze_and_alert)
-print("Bot çalışıyor, her 2 saatte bir analiz ve haber kontrolü yapılacak...")
+print("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı aktif ✅")
 
 while True:
     schedule.run_pending()
