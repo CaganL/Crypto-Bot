@@ -10,32 +10,33 @@ from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from telegram import Bot
-from dotenv import load_dotenv
 from googletrans import Translator
 import feedparser
 import praw
 import tweepy
 
 # -------------------------------
-# .env Yükleme
+# API ve Tokenlar
 # -------------------------------
-load_dotenv()
 BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 CHAT_ID = 7294398674
-TAAPI_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4
-COINGLASS_API_KEY = 36176ba717504abc9235e612d1daeb0c
-CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
+TAAPI_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4"
+COINGLASS_API_KEY = "36176ba717504abc9235e612d1daeb0c"
 
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_SECRET = os.getenv("REDDIT_SECRET")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
+# Reddit ve Twitter alanları boş bırakıldı, istersen doldurabilirsin
+REDDIT_CLIENT_ID = None
+REDDIT_SECRET = None
+REDDIT_USER_AGENT = None
 
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+TWITTER_API_KEY = None
+TWITTER_API_SECRET = None
+TWITTER_ACCESS_TOKEN = None
+TWITTER_ACCESS_SECRET = None
 
-bot = Bot(BOT_TOKEN) if BOT_TOKEN and CHAT_ID else None
+# -------------------------------
+# Bot ve Kütüphaneler
+# -------------------------------
+bot = Bot(BOT_TOKEN)
 translator = Translator()
 
 reddit = praw.Reddit(client_id=REDDIT_CLIENT_ID,
@@ -57,19 +58,14 @@ coin_aliases = {
     "AVAXUSDT": ["AVAX", "Avalanche", "AVAXUSDT"]
 }
 
-keywords = [alias for aliases in coin_aliases.values() for alias in aliases]
-
 # -------------------------------
-# Telegram Fonksiyonu
+# Telegram Mesajı Gönder
 # -------------------------------
 def send_telegram_message(message):
-    if bot:
-        try:
-            bot.send_message(chat_id=CHAT_ID, text=message)
-        except Exception as e:
-            print("Telegram gönderim hatası:", e)
-    else:
-        print("Telegram ayarları eksik veya bot başlatılmamış!")
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=message)
+    except Exception as e:
+        print("Telegram gönderim hatası:", e)
 
 # -------------------------------
 # Binance Fiyat Verisi
@@ -167,12 +163,11 @@ def ai_position_prediction(indicators, cg_data=None):
         position = "Short"
     else:
         position = "Neutral"
-    # Güven skorunu hesapla (%)
     confidence = min(max((score + 3)/6, 0), 1)*100
     return position, confidence
 
 # -------------------------------
-# Telegram Mesajı Gönder
+# Telegram Mesajı Gönder ve Analiz
 # -------------------------------
 def analyze_and_alert():
     alerts = []
@@ -198,15 +193,11 @@ def analyze_and_alert():
     send_telegram_message(full_message)
 
 # -------------------------------
-# Scheduler - Her 2 Saatte Bir
+# Scheduler - Her 1 Dakikada
 # -------------------------------
-schedule.every(2).hour.do(analyze_and_alert)
-print("Bot çalışıyor, her 2 saatte bir analiz ve haber kontrolü yapılacak...")
+schedule.every(1).minutes.do(analyze_and_alert)
+print("Bot çalışıyor, her 1 dakikada bir analiz ve haber kontrolü yapılacak...")
 
 while True:
     schedule.run_pending()
     time.sleep(60)
-
-
-
-
