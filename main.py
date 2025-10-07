@@ -22,8 +22,8 @@ import tweepy
 load_dotenv()
 BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 CHAT_ID = 7294398674
-TAAPI_KEY = os.getenv("TAAPI_API_KEY")
-COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY")
+TAAPI_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4
+COINGLASS_API_KEY = 36176ba717504abc9235e612d1daeb0c
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
@@ -206,6 +206,7 @@ print("Bot çalışıyor, her 2 saatte bir analiz ve haber kontrolü yapılacak.
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
 
 
