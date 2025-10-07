@@ -21,7 +21,7 @@ import tweepy
 BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 CHAT_ID = 7294398674
 TAAPI_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4"
-COINGLASS_API_KEY = "36176ba717504abc9235e612d1daeb0c"
+COINGLASS_API_KEY = "390c993f7c2745a2bf2e47c0eaf7d183"
 
 # Reddit ve Twitter alanları boş bırakıldı, istersen doldurabilirsin
 REDDIT_CLIENT_ID = None
@@ -201,4 +201,5 @@ print("Bot çalışıyor, her 1 dakikada bir analiz ve haber kontrolü yapılaca
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
