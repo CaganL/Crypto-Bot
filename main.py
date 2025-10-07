@@ -20,8 +20,8 @@ import tweepy
 # .env Yükleme
 # -------------------------------
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
+CHAT_ID = 7294398674
 TAAPI_KEY = os.getenv("TAAPI_API_KEY")
 COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY")
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
@@ -206,4 +206,5 @@ print("Bot çalışıyor, her 2 saatte bir analiz ve haber kontrolü yapılacak.
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
