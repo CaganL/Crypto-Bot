@@ -201,3 +201,4 @@ print("Bot çalışıyor, her 1 dakikada bir analiz ve haber kontrolü yapılaca
 while True:
     schedule.run_pending()
     time.sleep(60)
+
