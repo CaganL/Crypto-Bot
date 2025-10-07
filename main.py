@@ -200,11 +200,12 @@ def analyze_and_alert():
 # -------------------------------
 # Scheduler - Her 2 Saatte Bir
 # -------------------------------
-schedule.every(1).minutes.do(analyze_and_alert)
+schedule.every(2).hour.do(analyze_and_alert)
 print("Bot çalışıyor, her 2 saatte bir analiz ve haber kontrolü yapılacak...")
 
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
 
