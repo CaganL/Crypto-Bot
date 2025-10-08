@@ -241,11 +241,12 @@ def analyze_and_alert():
 # -------------------------------
 # Scheduler
 # -------------------------------
-schedule.every(1).minute.do(analyze_and_alert)
+schedule.every(2).hours.do(analyze_and_alert)
 print("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı aktif ✅")
 
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
 
