@@ -13,8 +13,8 @@ from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from telegram import Bot
 from datetime import datetime
-import psycopg2 # <-- YENİ: PostgreSQL kütüphanesi
-from urllib.parse import urlparse # <-- YENİ: Veritabanı URL'sini parçalamak için
+import psycopg2 
+from urllib.parse import urlparse
 
 # -------------------------------
 # Logging Kurulumu
@@ -44,14 +44,21 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 bot = Bot(BOT_TOKEN)
 
 # -------------------------------
-# Global Takipçiler
+# Global Takipçiler (9 Coin ile Güncel Hali)
 # -------------------------------
 coin_aliases = {
+    # Mevcut Coin'ler
     "BTCUSDT": ["BTC", "Bitcoin", "BTCUSDT"],
     "ETHUSDT": ["ETH", "Ethereum", "ETHUSDT"],
     "SOLUSDT": ["SOL", "Solana", "SOLUSDT"],
     "SUIUSDT": ["SUI", "Sui", "SUIUSDT"],
-    "AVAXUSDT": ["AVAX", "Avalanche", "AVAXUSDT"]
+    "AVAXUSDT": ["AVAX", "Avalanche", "AVAXUSDT"],
+    
+    # YENİ EKLENENLER (Öğrenmeyi hızlandırır)
+    "BNBUSDT": ["BNB", "Binance Coin", "BNBUSDT"],
+    "XRPUSDT": ["XRP", "Ripple", "XRPUSDT"],
+    "ADAUSDT": ["ADA", "Cardano", "ADAUSDT"],
+    "LINKUSDT": ["LINK", "Chainlink", "LINKUSDT"]
 }
 
 last_strong_alert = {} 
@@ -419,7 +426,7 @@ def analyze_and_alert():
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
 
         # -----------------------------
-        # ML VERİ KAYIT ADIMI (YENİ - Veritabanı)
+        # ML VERİ KAYIT ADIMI (Veritabanı)
         # -----------------------------
         save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score)
 
