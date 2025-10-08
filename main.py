@@ -103,19 +103,42 @@ def fetch_and_analyze(symbol="BTCUSDT"):
 def fetch_coinglass_data(symbol="BTC", retries=3):
     if not COINGLASS_API_KEY:
         return {"long_ratio": None, "short_ratio": None}
+
     for attempt in range(retries):
         try:
-            url = f"https://api.coinglass.com/api/pro/v1/futures/openInterest?symbol={symbol}"
+            url = f"https://open-api.coinglass.com/api/pro/v1/futures/openInterest?symbol={symbol}"
             headers = {"coinglassSecret": COINGLASS_API_KEY}
             r = requests.get(url, headers=headers, timeout=10)
-            r.raise_for_status()
+
+            # Boş veya hatalı yanıt kontrolü
+            if r.status_code != 200:
+                print(f"CoinGlass API HTTP {r.status_code}: {r.text[:100]}")
+                time.sleep(2)
+                continue
+
+            if not r.text.strip():
+                print(f"CoinGlass API boş yanıt döndü (deneme {attempt+1})")
+                time.sleep(2)
+                continue
+
             data = r.json()
-            long_ratio = data.get("data", {}).get("longRate")
-            short_ratio = data.get("data", {}).get("shortRate")
+            if not data.get("data"):
+                print(f"CoinGlass API veri boş (deneme {attempt+1})")
+                time.sleep(2)
+                continue
+
+            long_ratio = data["data"].get("longRate")
+            short_ratio = data["data"].get("shortRate")
             return {"long_ratio": long_ratio, "short_ratio": short_ratio}
+
+        except json.JSONDecodeError:
+            print(f"CoinGlass JSON hata (deneme {attempt+1}) — Yanıt:", r.text[:100])
+            time.sleep(2)
         except Exception as e:
             print(f"CoinGlass API hata ({attempt+1}/{retries}):", e)
             time.sleep(2)
+
+    # 3 denemeden sonra bile başarısızsa
     return {"long_ratio": None, "short_ratio": None}
 
 # -------------------------------
@@ -247,6 +270,7 @@ print("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı akti
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
 
 
