@@ -34,7 +34,7 @@ BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 CHAT_ID = 7294398674
 TAAPI_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4"
 COINGLASS_API_KEY = "36176ba717504abc9235e612d1daeb0c"
-NEWSAPI_KEY = "737732d907a6418e8542100a79ed705b"
+NEWSAPI_KEY = "" # <-- HABER API ANAHTARI SIFIRLANDI
 
 bot = Bot(BOT_TOKEN)
 translator = Translator()
@@ -50,17 +50,12 @@ coin_aliases = {
     "AVAXUSDT": ["AVAX", "Avalanche", "AVAXUSDT"]
 }
 
-# Hızlı Sinyal Takipçi (Spam'i önlemek için)
 last_strong_alert = {} 
-last_prices = {} # Fiyat sıçraması için mevcut
+last_prices = {} 
 
 # -------------------------------
-# ... (fetch_binance_klines, calculate_technical_indicators, 
-# fetch_multi_timeframe_analysis, fetch_coinglass_data, 
-# fetch_binance_openinterest, fetch_news, load_history, save_history 
-# ve ai_position_prediction fonksiyonları aynı kalmıştır) ...
+# Telegram Mesaj Fonksiyonu
 # -------------------------------
-
 def send_telegram_message(message):
     try:
         max_length = 4000 
@@ -73,7 +68,9 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"Telegram gönderim hatası: {e}")
 
+# -------------------------------
 # Binance Fiyat Verisi
+# -------------------------------
 def fetch_binance_klines(symbol="BTCUSDT", interval="4h", limit=100):
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -88,7 +85,9 @@ def fetch_binance_klines(symbol="BTCUSDT", interval="4h", limit=100):
         logger.error(f"Binance klines çekme hatası ({symbol}, {interval}): {e}")
         return pd.DataFrame()
 
+# -------------------------------
 # Teknik Analiz
+# -------------------------------
 def calculate_technical_indicators(df):
     if df.empty: return {}
     result = {}
@@ -109,7 +108,9 @@ def calculate_technical_indicators(df):
     result['last_close'] = df['close'].iloc[-1] if not df.empty else None
     return result
 
+# -------------------------------
 # Ana Veri Çekme ve Analiz (Çoklu Zaman Dilimli)
+# -------------------------------
 def fetch_multi_timeframe_analysis(symbol):
     analysis = {}
     intervals = {"15m": 100, "1h": 100, "4h": 100, "1d": 100} 
@@ -119,7 +120,9 @@ def fetch_multi_timeframe_analysis(symbol):
         analysis[interval] = indicators
     return analysis
 
+# -------------------------------
 # CoinGlass API / Binance fallback
+# -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
     if not COINGLASS_API_KEY: return fetch_binance_openinterest(symbol)
     for attempt in range(retries):
@@ -141,7 +144,9 @@ def fetch_coinglass_data(symbol="BTC", retries=3):
             logger.error(f"CoinGlass API hata ({attempt+1}/{retries}): {e}"); time.sleep(2)
     return fetch_binance_openinterest(symbol)
 
+# -------------------------------
 # Binance Fallback: Hassas OpenInterest + FundingRate
+# -------------------------------
 def fetch_binance_openinterest(symbol="BTC"):
     try:
         url_oi = f"https://fapi.binance.com/futures/data/openInterestHist?symbol={symbol}USDT&period=4h&limit=1"
@@ -157,8 +162,12 @@ def fetch_binance_openinterest(symbol="BTC"):
         logger.error(f"Binance OpenInterest/FundingRate hata: {e}")
         return {"long_ratio": None, "short_ratio": None, "funding_rate": None}
 
-# NewsAPI Haberleri
+# -------------------------------
+# NewsAPI Haberleri (Pasif: NEWSAPI_KEY boş olduğu için çalışmayacak)
+# -------------------------------
 def fetch_news():
+    if not NEWSAPI_KEY:
+        return []
     try:
         url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWSAPI_KEY}"
         r = requests.get(url, timeout=10); r.raise_for_status()
@@ -168,7 +177,9 @@ def fetch_news():
         logger.warning(f"NewsAPI hata: {e}")
         return []
 
+# -------------------------------
 # AI Öğrenme Sistemi
+# -------------------------------
 history_file = "history.json"
 def load_history():
     if os.path.exists(history_file):
@@ -229,7 +240,9 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     save_history(history)
     return position, confidence, score
 
+# -------------------------------
 # Ani Fiyat Dalgalanma Uyarısı (%5)
+# -------------------------------
 def check_price_spike(symbol, current_price):
     global last_prices
     if current_price is None: return 
@@ -243,7 +256,7 @@ def check_price_spike(symbol, current_price):
     last_prices[symbol] = current_price
 
 # -------------------------------
-# ❗️ YENİ FONKSİYON: ANLIK SİNYAL KONTROLÜ
+# ANLIK SİNYAL KONTROLÜ
 # -------------------------------
 def check_immediate_alert():
     global last_strong_alert
@@ -251,7 +264,6 @@ def check_immediate_alert():
     for coin in coin_aliases.keys():
         coin_short = coin.replace("USDT", "")
         
-        # Analiz yap
         multi_indicators = fetch_multi_timeframe_analysis(coin)
         cg_data = fetch_coinglass_data(coin_short)
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
@@ -259,7 +271,6 @@ def check_immediate_alert():
         current_price = multi_indicators.get("4h", {}).get('last_close')
         if current_price is None: continue
 
-        # Güçlü Sinyal Kontrolü (Skor >= 3.0 veya <= -3.0)
         is_strong_long = raw_score >= 3.0
         is_strong_short = raw_score <= -3.0
         
@@ -267,10 +278,7 @@ def check_immediate_alert():
         if is_strong_long: current_strong_pos = "Long"
         elif is_strong_short: current_strong_pos = "Short"
             
-        # Spam Önleme Kontrolü:
-        # 1. Şu an güçlü bir sinyal var VE
-        # 2. Bu sinyal, en son gönderdiğimiz sinyalden farklı
-        last_sent_pos = last_strong_alert.get(coin, "None")
+        last_sent_pos = last_strong_alert.get(coin, "Neutral")
         
         if current_strong_pos and current_strong_pos != last_sent_pos:
             direction = "BÜYÜK ALIM SİNYALİ GELDİ!" if current_strong_pos == "Long" else "BÜYÜK SATIM SİNYALİ GELDİ!"
@@ -284,13 +292,11 @@ def check_immediate_alert():
             
             send_telegram_message(msg)
             
-            # Son gönderilen sinyali güncelle
             last_strong_alert[coin] = current_strong_pos
             logger.info(f"Anlık güçlü sinyal gönderildi: {coin} -> {current_strong_pos}")
         
-        # Eğer skor nötr'e döndüyse, bir sonraki güçlü sinyali gönderebilmek için durumu 'None' olarak sıfırla.
-        elif current_strong_pos is None and last_sent_pos != "None":
-            last_strong_alert[coin] = "Neutral" # 'None' yerine 'Neutral' kullanmak daha okunaklı
+        elif current_strong_pos is None and last_sent_pos != "Neutral":
+            last_strong_alert[coin] = "Neutral"
             logger.info(f"{coin} güçlü sinyal durumu nötrlendi.")
 
 # -------------------------------
@@ -315,49 +321,10 @@ def analyze_and_alert():
         cg_data = fetch_coinglass_data(coin_short)
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
 
-        # Rapor Mesajı (Detaylı 1 Saatlik/2 Saatlik Rapor)
         msg = f"--- 🤖 **{coin} Çoklu Zaman Dilimi Raporu** ---\n"
         msg += f"💰 **Fiyat:** {current_price:.2f} USDT ({price_change_4h:+.2f}% son 4 saatte)\n"
         msg += f"🔥 **AI Tahmini:** **{position}**\n"
         msg += f"📊 **Güven Skoru:** **{confidence:.0f}%** (Skor: {raw_score:+.1f})\n"
         msg += "\n--- DETAYLI ANALİZ ---\n"
         
-        d1_ind = multi_indicators.get("1d", {})
-        d1_trend = "🔼 Güçlü YUKARI" if d1_ind.get('ema_short', 0) > d1_ind.get('ema_long', 0) else "🔽 Güçlü AŞAĞI"
-        msg += f"**D1 TREND (Ana Yön):** {d1_trend}\n"
-        
-        h4_trend = "🔼 Yukarı" if h4_indicators.get('ema_short', 0) > h4_indicators.get('ema_long', 0) else "🔽 Aşağı"
-        msg += f"**H4 RSI:** {rsi_4h:.1f} | **H4 EMA:** {h4_trend}\n"
-        
-        if cg_data["long_ratio"] is not None and cg_data["short_ratio"] is not None:
-            long_short_ratio_msg = f"{cg_data['long_ratio']*100:.1f}% Long / {cg_data['short_ratio']*100:.1f}% Short"
-            if cg_data['long_ratio'] > 0.65 or cg_data['short_ratio'] > 0.65:
-                 long_short_ratio_msg = f"⚠️ {long_short_ratio_msg} (Aşırı Duyarlılık!)"
-            msg += f"**L/S Oranı:** {long_short_ratio_msg}\n"
-            
-        if coin == list(coin_aliases.keys())[0]: 
-             news = fetch_news()
-             if news: msg += "\n📰 **Son Haberler:**\n" + "\n".join(news)
-
-        alerts.append(msg)
-
-    full_message = "\n\n" + "\n\n".join(alerts)
-    send_telegram_message(full_message)
-    logger.info("Analiz döngüsü tamamlandı.")
-
-# -------------------------------
-# Scheduler
-# -------------------------------
-# 1. Ana raporu her 1 saatte bir gönderir.
-schedule.every(1).hour.do(analyze_and_alert)      
-# 2. Güçlü sinyalleri her 15 dakikada bir kontrol eder.
-schedule.every(15).minutes.do(check_immediate_alert)
-
-logger.info("Bot çalışıyor... Her 1 saatte rapor + 15 dakikada anlık sinyal kontrolü aktif ✅")
-
-while True:
-    try:
-        schedule.run_pending()
-    except Exception as e:
-        logger.error(f"Scheduler çalışma hatası: {e}")
-    time.sleep(60)
+        d1_ind = multi_indicators
