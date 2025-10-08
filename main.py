@@ -41,7 +41,12 @@ coin_aliases = {
 # -------------------------------
 def send_telegram_message(message):
     try:
-        bot.send_message(chat_id=CHAT_ID, text=message)
+        max_length = 4000  # Telegram karakter sınırı
+        if len(message) > max_length:
+            for i in range(0, len(message), max_length):
+                bot.send_message(chat_id=CHAT_ID, text=message[i:i+max_length])
+        else:
+            bot.send_message(chat_id=CHAT_ID, text=message)
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
@@ -242,4 +247,5 @@ print("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı akti
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
