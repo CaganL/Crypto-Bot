@@ -12,9 +12,9 @@ from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from telegram import Bot
-from googletrans import Translator
 from datetime import datetime
-import csv # <-- YENİ: CSV kaydı için
+import psycopg2 # <-- YENİ: PostgreSQL kütüphanesi
+from urllib.parse import urlparse # <-- YENİ: Veritabanı URL'sini parçalamak için
 
 # -------------------------------
 # Logging Kurulumu
@@ -32,17 +32,19 @@ logger = logging.getLogger(__name__)
 # -------------------------------
 # API Anahtarları ve Telegram
 # -------------------------------
-BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
-CHAT_ID = 7294398674
-TAAPI_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4"
-COINGLASS_API_KEY = "36176ba717504abc9235e612d1daeb0c"
-NEWSAPI_KEY = "" 
+# Railway'de ortam değişkenleri kullanılır. BOT_TOKEN, CHAT_ID vb. Railway'de tanımlı olmalıdır.
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs") # Örnek değerler, Railway'deki ortam değişkenleri kullanılacak
+CHAT_ID = int(os.getenv("CHAT_ID", "7294398674")) 
+COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY", "36176ba717504abc9235e612d1daeb0c")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+
+# PostgreSQL Bağlantı URL'si (Railway Otomatik Sağlar)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 bot = Bot(BOT_TOKEN)
-translator = Translator()
 
 # -------------------------------
-# Coin Alias ve Global Takipçiler
+# Global Takipçiler
 # -------------------------------
 coin_aliases = {
     "BTCUSDT": ["BTC", "Bitcoin", "BTCUSDT"],
@@ -56,7 +58,65 @@ last_strong_alert = {}
 last_prices = {} 
 
 # -------------------------------
-# Telegram Mesaj Fonksiyonu
+# YENİ FONKSİYON: Veritabanı Bağlantısı ve Tablo Oluşturma
+# -------------------------------
+def get_db_connection():
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL ortam değişkeni tanımlı değil.")
+        return None
+
+    try:
+        url = urlparse(DATABASE_URL)
+        conn = psycopg2.connect(
+            database=url.path[1:],
+            user=url.username,
+            password=url.password,
+            host=url.hostname,
+            port=url.port
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"Veritabanı bağlantı hatası: {e}")
+        return None
+
+def create_ml_table():
+    conn = get_db_connection()
+    if not conn: return
+
+    cursor = conn.cursor()
+    # ML verisi için tablo oluşturma (mevcut değilse)
+    table_name = "ml_analysis_data"
+    
+    # Tüm indikatörler, long/short ve skorlar için sütunlar tanımlanır
+    command = f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        id SERIAL PRIMARY KEY,
+        timestamp TIMESTAMP WITH TIME ZONE,
+        symbol VARCHAR(10),
+        price NUMERIC,
+        raw_score NUMERIC,
+        
+        d1_rsi NUMERIC, d1_macd NUMERIC, d1_ema_diff NUMERIC,
+        h4_rsi NUMERIC, h4_macd NUMERIC, h4_ema_diff NUMERIC,
+        h1_rsi NUMERIC, h1_macd NUMERIC, h1_ema_diff NUMERIC,
+        m15_rsi NUMERIC, m15_macd NUMERIC, m15_ema_diff NUMERIC,
+        
+        long_ratio NUMERIC,
+        short_ratio NUMERIC
+    );
+    """
+    try:
+        cursor.execute(command)
+        conn.commit()
+        logger.info(f"'{table_name}' tablosu kontrol edildi/oluşturuldu.")
+    except Exception as e:
+        logger.error(f"Tablo oluşturma hatası: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------------
+# Telegram Mesaj Fonksiyonu (Aynı Kaldı)
 # -------------------------------
 def send_telegram_message(message):
     try:
@@ -71,7 +131,7 @@ def send_telegram_message(message):
         logger.error(f"Telegram gönderim hatası: {e}")
 
 # -------------------------------
-# Binance Fiyat Verisi
+# Binance Fiyat Verisi (Aynı Kaldı)
 # -------------------------------
 def fetch_binance_klines(symbol="BTCUSDT", interval="4h", limit=100):
     try:
@@ -88,24 +148,20 @@ def fetch_binance_klines(symbol="BTCUSDT", interval="4h", limit=100):
         return pd.DataFrame()
 
 # -------------------------------
-# Teknik Analiz
+# Teknik Analiz (Aynı Kaldı)
 # -------------------------------
 def calculate_technical_indicators(df):
     if df.empty: return {}
     result = {}
-    # RSI
     rsi = RSIIndicator(close=df['close'], window=14)
     result['rsi'] = rsi.rsi().iloc[-1] if not rsi.rsi().empty else None
-    # EMA
     ema_short = EMAIndicator(close=df['close'], window=12)
     ema_long = EMAIndicator(close=df['close'], window=26)
     result['ema_short'] = ema_short.ema_indicator().iloc[-1] if not ema_short.ema_indicator().empty else None
     result['ema_long'] = ema_long.ema_indicator().iloc[-1] if not ema_long.ema_indicator().empty else None
-    # MACD
     macd_indicator = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9)
     result['macd_diff'] = macd_indicator.macd_diff().iloc[-1] if not macd_indicator.macd_diff().empty else None
     
-    # Fiyat ve Değişim
     result['last_close'] = df['close'].iloc[-1] if not df.empty else None
     if len(df) >= 2:
         last_close = df['close'].iloc[-1]
@@ -117,7 +173,7 @@ def calculate_technical_indicators(df):
     return result
 
 # -------------------------------
-# Ana Veri Çekme ve Analiz (Çoklu Zaman Dilimli)
+# Ana Veri Çekme ve Analiz (Aynı Kaldı)
 # -------------------------------
 def fetch_multi_timeframe_analysis(symbol):
     analysis = {}
@@ -129,7 +185,7 @@ def fetch_multi_timeframe_analysis(symbol):
     return analysis
 
 # -------------------------------
-# CoinGlass API / Binance fallback
+# CoinGlass / Binance Fallback (Aynı Kaldı)
 # -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
     if not COINGLASS_API_KEY: return fetch_binance_openinterest(symbol)
@@ -152,9 +208,6 @@ def fetch_coinglass_data(symbol="BTC", retries=3):
             logger.error(f"CoinGlass API hata ({attempt+1}/{retries}): {e}"); time.sleep(2)
     return fetch_binance_openinterest(symbol)
 
-# -------------------------------
-# Binance Fallback: Hassas OpenInterest + FundingRate
-# -------------------------------
 def fetch_binance_openinterest(symbol="BTC"):
     try:
         url_oi = f"https://fapi.binance.com/futures/data/openInterestHist?symbol={symbol}USDT&period=4h&limit=1"
@@ -171,21 +224,7 @@ def fetch_binance_openinterest(symbol="BTC"):
         return {"long_ratio": None, "short_ratio": None, "funding_rate": None}
 
 # -------------------------------
-# NewsAPI Haberleri (Pasif)
-# -------------------------------
-def fetch_news():
-    if not NEWSAPI_KEY: return []
-    try:
-        url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWSAPI_KEY}"
-        r = requests.get(url, timeout=10); r.raise_for_status()
-        articles = r.json().get("articles", [])
-        return [f"{a['title']} - {a['url']}" for a in articles[:5]]
-    except Exception as e:
-        logger.warning(f"NewsAPI hata: {e}")
-        return []
-
-# -------------------------------
-# AI Öğrenme Sistemi
+# AI Öğrenme Sistemi (Aynı Kaldı)
 # -------------------------------
 history_file = "history.json"
 def load_history():
@@ -248,7 +287,7 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     return position, confidence, score
 
 # -------------------------------
-# Ani Fiyat Dalgalanma Uyarısı (%5)
+# Ani Fiyat Dalgalanma Uyarısı (%5) (Aynı Kaldı)
 # -------------------------------
 def check_price_spike(symbol, current_price):
     global last_prices
@@ -263,7 +302,57 @@ def check_price_spike(symbol, current_price):
     last_prices[symbol] = current_price
 
 # -------------------------------
-# ANLIK SİNYAL KONTROLÜ
+# YENİ FONKSİYON: PostgreSQL'e Kayıt
+# -------------------------------
+def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
+    conn = get_db_connection()
+    if not conn: return
+    
+    cursor = conn.cursor()
+    table_name = "ml_analysis_data"
+    
+    current_time = datetime.now()
+    current_price = multi_indicators.get("4h", {}).get('last_close')
+    
+    # Tüm zaman dilimi verilerini alıp tek bir tuple yapısında toplama
+    data_list = [current_time, coin, current_price, raw_score]
+
+    for interval in ["1d", "4h", "1h", "15m"]:
+        ind = multi_indicators.get(interval, {})
+        ema_diff = ind.get('ema_short', 0) - ind.get('ema_long', 0)
+        data_list.extend([
+            ind.get('rsi'),
+            ind.get('macd_diff'),
+            ema_diff
+        ])
+    
+    data_list.extend([cg_data.get('long_ratio'), cg_data.get('short_ratio')])
+
+    # SQL komutu hazırlama
+    columns = [
+        'timestamp', 'symbol', 'price', 'raw_score',
+        'd1_rsi', 'd1_macd', 'd1_ema_diff', 
+        'h4_rsi', 'h4_macd', 'h4_ema_diff', 
+        'h1_rsi', 'h1_macd', 'h1_ema_diff', 
+        'm15_rsi', 'm15_macd', 'm15_ema_diff', 
+        'long_ratio', 'short_ratio'
+    ]
+    
+    values_placeholder = ', '.join(['%s'] * len(columns))
+    insert_command = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({values_placeholder})"
+    
+    try:
+        cursor.execute(insert_command, data_list)
+        conn.commit()
+        logger.info(f"{coin} için ML verisi veritabanına kaydedildi.")
+    except Exception as e:
+        logger.error(f"Veritabanına veri yazma hatası ({coin}): {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------------
+# ANLIK SİNYAL KONTROLÜ (Aynı Kaldı)
 # -------------------------------
 def check_immediate_alert():
     global last_strong_alert
@@ -275,6 +364,7 @@ def check_immediate_alert():
         cg_data = fetch_coinglass_data(coin_short)
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
         
+        # ... (Anlık uyarı mantığı aynı kalır) ...
         current_price = multi_indicators.get("4h", {}).get('last_close')
         if current_price is None: continue
 
@@ -305,64 +395,6 @@ def check_immediate_alert():
         elif current_strong_pos is None and last_sent_pos != "Neutral":
             last_strong_alert[coin] = "Neutral"
             logger.info(f"{coin} güçlü sinyal durumu nötrlendi.")
-            
-# -------------------------------
-# YENİ FONKSİYON: ML Verisi Kayıt
-# -------------------------------
-ML_DATA_FILE = "ml_data.csv"
-ML_HEADERS = [
-    'timestamp', 'symbol', 'price', 
-    '1d_rsi', '1d_macd', '1d_ema_diff', 
-    '4h_rsi', '4h_macd', '4h_ema_diff', 
-    '1h_rsi', '1h_macd', '1h_ema_diff', 
-    '15m_rsi', '15m_macd', '15m_ema_diff', 
-    'long_ratio', 'short_ratio', 
-    'raw_score' 
-]
-
-def save_ml_data(coin, multi_indicators, cg_data, raw_score):
-    """
-    ML eğitimi için gerekli tüm indikatör değerlerini CSV dosyasına kaydeder.
-    """
-    try:
-        current_time = datetime.now().isoformat()
-        
-        # ML Veri Satırını Hazırla
-        data_row = [current_time, coin, multi_indicators.get("4h", {}).get('last_close')]
-        
-        # Çoklu Zaman Dilimi İndikatörlerini Ekle
-        for interval in ["1d", "4h", "1h", "15m"]:
-            ind = multi_indicators.get(interval, {})
-            # EMA_DIFF: (ema_short - ema_long) trendin gücünü gösterir
-            ema_diff = ind.get('ema_short', 0) - ind.get('ema_long', 0)
-            data_row.extend([
-                ind.get('rsi'),
-                ind.get('macd_diff'),
-                ema_diff
-            ])
-
-        # Long/Short Oranlarını Ekle
-        data_row.extend([
-            cg_data.get('long_ratio'), 
-            cg_data.get('short_ratio')
-        ])
-        
-        # Sonuç Skoru Ekle
-        data_row.append(raw_score)
-
-        # CSV'ye Yazma
-        file_exists = os.path.isfile(ML_DATA_FILE)
-        with open(ML_DATA_FILE, 'a', newline='') as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(ML_HEADERS)
-            writer.writerow(data_row)
-            
-        logger.info(f"{coin} için ML verisi başarıyla kaydedildi: {ML_DATA_FILE}")
-
-    except Exception as e:
-        logger.error(f"ML verisi kaydetme hatası ({coin}): {e}")
-
 
 # -------------------------------
 # Ana Analiz Fonksiyonu (Periyodik Rapor)
@@ -387,9 +419,9 @@ def analyze_and_alert():
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
 
         # -----------------------------
-        # ML VERİ KAYIT ADIMI (YENİ)
+        # ML VERİ KAYIT ADIMI (YENİ - Veritabanı)
         # -----------------------------
-        save_ml_data(coin, multi_indicators, cg_data, raw_score)
+        save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score)
 
         # Rapor Mesajı (Telegram'a gönderilecek)
         msg = f"--- 🤖 **{coin} Çoklu Zaman Dilimi Raporu** ---\n"
@@ -418,16 +450,21 @@ def analyze_and_alert():
     logger.info("Analiz döngüsü tamamlandı.")
 
 # -------------------------------
-# Scheduler
+# Bot Başlangıç ve Scheduler
 # -------------------------------
-schedule.every(1).hour.do(analyze_and_alert)      
-schedule.every(15).minutes.do(check_immediate_alert)
+if __name__ == "__main__":
+    # Bot çalışmaya başlamadan önce tabloyu kontrol et/oluştur
+    create_ml_table()
+    
+    # Scheduler ayarları
+    schedule.every(1).hour.do(analyze_and_alert)      
+    schedule.every(15).minutes.do(check_immediate_alert)
 
-logger.info("Bot çalışıyor... Her 1 saatte rapor + 15 dakikada anlık sinyal kontrolü aktif ✅")
+    logger.info("Bot çalışıyor... Kalıcı veritabanı kaydı aktif ✅")
 
-while True:
-    try:
-        schedule.run_pending()
-    except Exception as e:
-        logger.error(f"Scheduler çalışma hatası: {e}")
-    time.sleep(60)
+    while True:
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            logger.error(f"Scheduler çalışma hatası: {e}")
+        time.sleep(60)
