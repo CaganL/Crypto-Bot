@@ -13,6 +13,8 @@ from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from telegram import Bot
 from googletrans import Translator
+from datetime import datetime
+import csv # <-- YENİ: CSV kaydı için
 
 # -------------------------------
 # Logging Kurulumu
@@ -34,7 +36,7 @@ BOT_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 CHAT_ID = 7294398674
 TAAPI_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHVlIjoiNjhlM2RkOTk4MDZmZjE2NTFlOGY3NjlkIiwiaWF0IjoxNzU5ODYyNDEyLCJleHAiOjMzMjY0MzI2NDEyfQ.dmvJC5-LNScEkhWdziBA21Ig8hc2oGsaNNohyfrIaD4"
 COINGLASS_API_KEY = "36176ba717504abc9235e612d1daeb0c"
-NEWSAPI_KEY = "" # <-- HABER API ANAHTARI SIFIRLANDI
+NEWSAPI_KEY = "" 
 
 bot = Bot(BOT_TOKEN)
 translator = Translator()
@@ -91,21 +93,27 @@ def fetch_binance_klines(symbol="BTCUSDT", interval="4h", limit=100):
 def calculate_technical_indicators(df):
     if df.empty: return {}
     result = {}
+    # RSI
     rsi = RSIIndicator(close=df['close'], window=14)
     result['rsi'] = rsi.rsi().iloc[-1] if not rsi.rsi().empty else None
+    # EMA
     ema_short = EMAIndicator(close=df['close'], window=12)
     ema_long = EMAIndicator(close=df['close'], window=26)
     result['ema_short'] = ema_short.ema_indicator().iloc[-1] if not ema_short.ema_indicator().empty else None
     result['ema_long'] = ema_long.ema_indicator().iloc[-1] if not ema_long.ema_indicator().empty else None
+    # MACD
     macd_indicator = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9)
     result['macd_diff'] = macd_indicator.macd_diff().iloc[-1] if not macd_indicator.macd_diff().empty else None
+    
+    # Fiyat ve Değişim
+    result['last_close'] = df['close'].iloc[-1] if not df.empty else None
     if len(df) >= 2:
         last_close = df['close'].iloc[-1]
         prev_close = df['close'].iloc[-2]
         result['price_change'] = ((last_close - prev_close) / prev_close) * 100
     else:
         result['price_change'] = 0
-    result['last_close'] = df['close'].iloc[-1] if not df.empty else None
+    
     return result
 
 # -------------------------------
@@ -163,11 +171,10 @@ def fetch_binance_openinterest(symbol="BTC"):
         return {"long_ratio": None, "short_ratio": None, "funding_rate": None}
 
 # -------------------------------
-# NewsAPI Haberleri (Pasif: NEWSAPI_KEY boş olduğu için çalışmayacak)
+# NewsAPI Haberleri (Pasif)
 # -------------------------------
 def fetch_news():
-    if not NEWSAPI_KEY:
-        return []
+    if not NEWSAPI_KEY: return []
     try:
         url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWSAPI_KEY}"
         r = requests.get(url, timeout=10); r.raise_for_status()
@@ -298,6 +305,64 @@ def check_immediate_alert():
         elif current_strong_pos is None and last_sent_pos != "Neutral":
             last_strong_alert[coin] = "Neutral"
             logger.info(f"{coin} güçlü sinyal durumu nötrlendi.")
+            
+# -------------------------------
+# YENİ FONKSİYON: ML Verisi Kayıt
+# -------------------------------
+ML_DATA_FILE = "ml_data.csv"
+ML_HEADERS = [
+    'timestamp', 'symbol', 'price', 
+    '1d_rsi', '1d_macd', '1d_ema_diff', 
+    '4h_rsi', '4h_macd', '4h_ema_diff', 
+    '1h_rsi', '1h_macd', '1h_ema_diff', 
+    '15m_rsi', '15m_macd', '15m_ema_diff', 
+    'long_ratio', 'short_ratio', 
+    'raw_score' 
+]
+
+def save_ml_data(coin, multi_indicators, cg_data, raw_score):
+    """
+    ML eğitimi için gerekli tüm indikatör değerlerini CSV dosyasına kaydeder.
+    """
+    try:
+        current_time = datetime.now().isoformat()
+        
+        # ML Veri Satırını Hazırla
+        data_row = [current_time, coin, multi_indicators.get("4h", {}).get('last_close')]
+        
+        # Çoklu Zaman Dilimi İndikatörlerini Ekle
+        for interval in ["1d", "4h", "1h", "15m"]:
+            ind = multi_indicators.get(interval, {})
+            # EMA_DIFF: (ema_short - ema_long) trendin gücünü gösterir
+            ema_diff = ind.get('ema_short', 0) - ind.get('ema_long', 0)
+            data_row.extend([
+                ind.get('rsi'),
+                ind.get('macd_diff'),
+                ema_diff
+            ])
+
+        # Long/Short Oranlarını Ekle
+        data_row.extend([
+            cg_data.get('long_ratio'), 
+            cg_data.get('short_ratio')
+        ])
+        
+        # Sonuç Skoru Ekle
+        data_row.append(raw_score)
+
+        # CSV'ye Yazma
+        file_exists = os.path.isfile(ML_DATA_FILE)
+        with open(ML_DATA_FILE, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(ML_HEADERS)
+            writer.writerow(data_row)
+            
+        logger.info(f"{coin} için ML verisi başarıyla kaydedildi: {ML_DATA_FILE}")
+
+    except Exception as e:
+        logger.error(f"ML verisi kaydetme hatası ({coin}): {e}")
+
 
 # -------------------------------
 # Ana Analiz Fonksiyonu (Periyodik Rapor)
@@ -321,10 +386,48 @@ def analyze_and_alert():
         cg_data = fetch_coinglass_data(coin_short)
         position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
 
+        # -----------------------------
+        # ML VERİ KAYIT ADIMI (YENİ)
+        # -----------------------------
+        save_ml_data(coin, multi_indicators, cg_data, raw_score)
+
+        # Rapor Mesajı (Telegram'a gönderilecek)
         msg = f"--- 🤖 **{coin} Çoklu Zaman Dilimi Raporu** ---\n"
         msg += f"💰 **Fiyat:** {current_price:.2f} USDT ({price_change_4h:+.2f}% son 4 saatte)\n"
         msg += f"🔥 **AI Tahmini:** **{position}**\n"
         msg += f"📊 **Güven Skoru:** **{confidence:.0f}%** (Skor: {raw_score:+.1f})\n"
         msg += "\n--- DETAYLI ANALİZ ---\n"
         
-        d1_ind = multi_indicators
+        d1_ind = multi_indicators.get("1d", {})
+        d1_trend = "🔼 Güçlü YUKARI" if d1_ind.get('ema_short', 0) > d1_ind.get('ema_long', 0) else "🔽 Güçlü AŞAĞI"
+        msg += f"**D1 TREND (Ana Yön):** {d1_trend}\n"
+        
+        h4_trend = "🔼 Yukarı" if h4_indicators.get('ema_short', 0) > h4_indicators.get('ema_long', 0) else "🔽 Aşağı"
+        msg += f"**H4 RSI:** {rsi_4h:.1f} | **H4 EMA:** {h4_trend}\n"
+        
+        if cg_data["long_ratio"] is not None and cg_data["short_ratio"] is not None:
+            long_short_ratio_msg = f"{cg_data['long_ratio']*100:.1f}% Long / {cg_data['short_ratio']*100:.1f}% Short"
+            if cg_data['long_ratio'] > 0.65 or cg_data['short_ratio'] > 0.65:
+                 long_short_ratio_msg = f"⚠️ {long_short_ratio_msg} (Aşırı Duyarlılık!)"
+            msg += f"**L/S Oranı:** {long_short_ratio_msg}\n"
+            
+        alerts.append(msg)
+
+    full_message = "\n\n" + "\n\n".join(alerts)
+    send_telegram_message(full_message)
+    logger.info("Analiz döngüsü tamamlandı.")
+
+# -------------------------------
+# Scheduler
+# -------------------------------
+schedule.every(1).hour.do(analyze_and_alert)      
+schedule.every(15).minutes.do(check_immediate_alert)
+
+logger.info("Bot çalışıyor... Her 1 saatte rapor + 15 dakikada anlık sinyal kontrolü aktif ✅")
+
+while True:
+    try:
+        schedule.run_pending()
+    except Exception as e:
+        logger.error(f"Scheduler çalışma hatası: {e}")
+    time.sleep(60)
