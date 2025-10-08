@@ -100,6 +100,9 @@ def fetch_and_analyze(symbol="BTCUSDT"):
 # -------------------------------
 # CoinGlass API
 # -------------------------------
+# -------------------------------
+# CoinGlass API
+# -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
     if not COINGLASS_API_KEY:
         return {"long_ratio": None, "short_ratio": None}
@@ -122,23 +125,14 @@ def fetch_coinglass_data(symbol="BTC", retries=3):
                 continue
 
             data = r.json()
-            if not data.get("data"):
-                print(f"CoinGlass API veri boş (deneme {attempt+1})")
-                time.sleep(2)
-                continue
-
-            long_ratio = data["data"].get("longRate")
-            short_ratio = data["data"].get("shortRate")
+            long_ratio = data.get("data", {}).get("longRate")
+            short_ratio = data.get("data", {}).get("shortRate")
             return {"long_ratio": long_ratio, "short_ratio": short_ratio}
 
-        except json.JSONDecodeError:
-            print(f"CoinGlass JSON hata (deneme {attempt+1}) — Yanıt:", r.text[:100])
-            time.sleep(2)
         except Exception as e:
             print(f"CoinGlass API hata ({attempt+1}/{retries}):", e)
             time.sleep(2)
 
-    # 3 denemeden sonra bile başarısızsa
     return {"long_ratio": None, "short_ratio": None}
 
 # -------------------------------
@@ -270,6 +264,7 @@ print("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı akti
 while True:
     schedule.run_pending()
     time.sleep(60)
+
 
 
 
