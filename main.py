@@ -409,7 +409,7 @@ def analyze_and_alert():
 # -------------------------------
 # Scheduler
 # -------------------------------
-schedule.every(2).hours.do(analyze_and_alert)
+schedule.every(1).hours.do(analyze_and_alert)
 logger.info("Bot çalışıyor... Her 2 saatte analiz + anlık %5 fiyat uyarısı aktif ✅")
 
 while True:
@@ -418,3 +418,4 @@ while True:
     except Exception as e:
         logger.error(f"Scheduler çalışma hatası: {e}")
     time.sleep(60)
+
