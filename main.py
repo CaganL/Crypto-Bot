@@ -7,13 +7,13 @@ import pandas as pd
 import schedule
 import time
 import json
-import logging 
+import logging
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from telegram import Bot
 from datetime import datetime
-import psycopg2 
+import psycopg2
 from urllib.parse import urlparse
 
 # -------------------------------
@@ -23,8 +23,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("bot.log"), 
-        logging.StreamHandler()        
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # -------------------------------
 # Railway'de ortam değişkenleri kullanılır. BOT_TOKEN, CHAT_ID vb. Railway'de tanımlı olmalıdır.
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs") # Örnek değerler, Railway'deki ortam değişkenleri kullanılacak
-CHAT_ID = int(os.getenv("CHAT_ID", "7294398674")) 
+CHAT_ID = int(os.getenv("CHAT_ID", "7294398674"))
 COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY", "36176ba717504abc9235e612d1daeb0c")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 
@@ -61,8 +61,8 @@ coin_aliases = {
     "LINKUSDT": ["LINK", "Chainlink", "LINKUSDT"]
 }
 
-last_strong_alert = {} 
-last_prices = {} 
+last_strong_alert = {}
+last_prices = {}
 
 # -------------------------------
 # YENİ FONKSİYON: Veritabanı Bağlantısı ve Tablo Oluşturma
@@ -127,7 +127,7 @@ def create_ml_table():
 # -------------------------------
 def send_telegram_message(message):
     try:
-        max_length = 4000 
+        max_length = 4000
         if len(message) > max_length:
             for i in range(0, len(message), max_length):
                 bot.send_message(chat_id=CHAT_ID, text=message[i:i+max_length])
@@ -184,7 +184,7 @@ def calculate_technical_indicators(df):
 # -------------------------------
 def fetch_multi_timeframe_analysis(symbol):
     analysis = {}
-    intervals = {"15m": 100, "1h": 100, "4h": 100, "1d": 100} 
+    intervals = {"15m": 100, "1h": 100, "4h": 100, "1d": 100}
     for interval, limit in intervals.items():
         df = fetch_binance_klines(symbol=symbol, interval=interval, limit=limit)
         indicators = calculate_technical_indicators(df)
@@ -251,31 +251,31 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     # 0. 15 Dakikalık (15m) Erken Sinyal (+/- 0.5)
     m15_ind = multi_indicators.get("15m", {})
     if m15_ind.get('macd_diff') is not None:
-        if m15_ind['macd_diff'] > 0: score += 0.5 
-        elif m15_ind['macd_diff'] < 0: score -= 0.5 
+        if m15_ind['macd_diff'] > 0: score += 0.5
+        elif m15_ind['macd_diff'] < 0: score -= 0.5
 
     # 1. Günlük (1d) Trend (+/- 2.5)
     d1_ind = multi_indicators.get("1d", {})
     if d1_ind.get('ema_short') is not None and d1_ind.get('ema_long') is not None:
-        if d1_ind.get('ema_short') > d1_ind.get('ema_long'): score += 2.5 
-        elif d1_ind.get('ema_short') < d1_ind.get('ema_long'): score -= 2.5 
+        if d1_ind.get('ema_short') > d1_ind.get('ema_long'): score += 2.5
+        elif d1_ind.get('ema_short') < d1_ind.get('ema_long'): score -= 2.5
             
     # 2. 4 Saatlik (4h) Momentum (+/- 1.5)
     h4_ind = multi_indicators.get("4h", {})
     if h4_ind.get('rsi') is not None:
-        if h4_ind['rsi'] < 30: score += 1.5 
-        elif h4_ind['rsi'] > 70: score -= 1.5 
+        if h4_ind['rsi'] < 30: score += 1.5
+        elif h4_ind['rsi'] > 70: score -= 1.5
 
     # 3. 1 Saatlik (1h) Momentum Değişimi (+/- 1.0)
     h1_ind = multi_indicators.get("1h", {})
     if h1_ind.get('macd_diff') is not None:
-        if h1_ind['macd_diff'] > 0: score += 1.0 
-        elif h1_ind['macd_diff'] < 0: score -= 1.0 
+        if h1_ind['macd_diff'] > 0: score += 1.0
+        elif h1_ind['macd_diff'] < 0: score -= 1.0
 
     # 4. Long/Short Oranı (+/- 1.5)
     if cg_data and cg_data["long_ratio"] and cg_data["short_ratio"]:
-        if cg_data["long_ratio"] > 0.65: score -= 1.5 
-        elif cg_data["short_ratio"] > 0.65: score += 1.5 
+        if cg_data["long_ratio"] > 0.65: score -= 1.5
+        elif cg_data["short_ratio"] > 0.65: score += 1.5
             
     # 5. Pozisyon Sürekliliği (+/- 0.5)
     last_pos = history.get(symbol, {}).get("last_position")
@@ -289,8 +289,8 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     elif score <= -1.0: position = "Short"
     else: position = "Neutral"
 
-    confidence = min(abs(score / 5) * 100, 100) 
-    history[symbol] = {"last_position": position.split()[0]} 
+    confidence = min(abs(score / 5) * 100, 100)
+    history[symbol] = {"last_position": position.split()[0]}
     save_history(history)
     return position, confidence, score
 
@@ -299,7 +299,7 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
 # -------------------------------
 def check_price_spike(symbol, current_price):
     global last_prices
-    if current_price is None: return 
+    if current_price is None: return
     if symbol in last_prices:
         old_price = last_prices[symbol]
         change_pct = ((current_price - old_price) / old_price) * 100
@@ -322,11 +322,12 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
     current_time = datetime.now()
     current_price = multi_indicators.get("4h", {}).get('last_close')
     
-    # Tüm zaman dilimi verilerini alıp tek bir tuple yapısında toplama
+    # 1. Ham verileri toplama (Bazıları hala np.float64 olabilir)
     data_list = [current_time, coin, current_price, raw_score]
 
     for interval in ["1d", "4h", "1h", "15m"]:
         ind = multi_indicators.get(interval, {})
+        # Not: Ema farkı hesaplaması da numpy değeri üretebilir
         ema_diff = ind.get('ema_short') - ind.get('ema_long') if ind.get('ema_short') is not None and ind.get('ema_long') is not None else None
         data_list.extend([
             ind.get('rsi'),
@@ -348,16 +349,16 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
                 final_data_list.append(float(item))
             except (ValueError, TypeError):
                 # Dönüştürülemezse None olarak ekle
-                final_data_list.append(None) 
+                final_data_list.append(None)
     # 🚨🚨 DÜZELTME SONU 🚨🚨
 
     # SQL komutu hazırlama
     columns = [
         'timestamp', 'symbol', 'price', 'raw_score',
-        'd1_rsi', 'd1_macd', 'd1_ema_diff', 
-        'h4_rsi', 'h4_macd', 'h4_ema_diff', 
-        'h1_rsi', 'h1_macd', 'h1_ema_diff', 
-        'm15_rsi', 'm15_macd', 'm15_ema_diff', 
+        'd1_rsi', 'd1_macd', 'd1_ema_diff',
+        'h4_rsi', 'h4_macd', 'h4_ema_diff',
+        'h1_rsi', 'h1_macd', 'h1_ema_diff',
+        'm15_rsi', 'm15_macd', 'm15_ema_diff',
         'long_ratio', 'short_ratio'
     ]
     
@@ -404,12 +405,13 @@ def check_immediate_alert():
         if current_strong_pos and current_strong_pos != last_sent_pos:
             direction = "BÜYÜK ALIM SİNYALİ GELDİ!" if current_strong_pos == "Long" else "BÜYÜK SATIM SİNYALİ GELDİ!"
             
+            # Matplotlib denklemi için LaTeX kullanıldığı için normal metin içine alıyorum
             msg = (f"🚨🚨 **ANLIK GÜÇLÜ SİNYAL UYARISI!** 🚨🚨\n\n"
                       f"**COIN:** {coin}\n"
                       f"**SİNYAL:** {current_strong_pos} ({direction})\n"
                       f"**GÜVEN SKORU:** {confidence:.0f}%\n"
                       f"**ANLIK FİYAT:** {current_price:.2f} USDT\n\n"
-                      f"*(Not: Bu sinyal, AI skorunun $\ge 3.0$ veya $\le -3.0$ olduğu için hemen gönderilmiştir.)*")
+                      f"*(Not: Bu sinyal, AI skorunun $\\ge 3.0$ veya $\\le -3.0$ olduğu için hemen gönderilmiştir.)*")
             
             send_telegram_message(msg)
             
@@ -484,7 +486,7 @@ if __name__ == "__main__":
     analyze_and_alert()
     
     # Scheduler ayarları
-    schedule.every(1).hour.do(analyze_and_alert)     
+    schedule.every(1).hour.do(analyze_and_alert)
     schedule.every(15).minutes.do(check_immediate_alert)
 
     logger.info("Bot çalışıyor... Kalıcı veritabanı kaydı aktif ✅")
