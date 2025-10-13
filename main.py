@@ -192,10 +192,15 @@ def fetch_multi_timeframe_analysis(symbol):
     return analysis
 
 # -------------------------------
-# CoinGlass / Binance Fallback (Aynı Kaldı)
+# CoinGlass / Binance Fallback (HIZLANDIRILDI)
 # -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
-    if not COINGLASS_API_KEY: return fetch_binance_openinterest(symbol)
+    # 🚀 KRİTİK HIZLANDIRMA: CoinGlass sürekli boş döndüğü için 3 deneme (6 saniye) kaybetmemek adına, 
+    # API key olsa bile direkt Binance verisine geçiş sağlanmıştır.
+    if not COINGLASS_API_KEY or True: 
+        logger.warning("CoinGlass atlandı, Binance Long/Short verisi kullanılıyor.")
+        return fetch_binance_openinterest(symbol)
+
     for attempt in range(retries):
         try:
             url = f"https://open-api.coinglass.com/api/pro/v1/futures/openInterest?symbol={symbol}"
@@ -322,12 +327,12 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
     current_time = datetime.now()
     current_price = multi_indicators.get("4h", {}).get('last_close')
     
-    # 1. Ham verileri toplama (Hala np.float64 olabilir)
+    # 1. Ham verileri toplama
     data_list = [current_time, coin, current_price, raw_score]
 
     for interval in ["1d", "4h", "1h", "15m"]:
         ind = multi_indicators.get(interval, {})
-        # Not: Ema farkı hesaplaması da numpy değeri üretebilir
+        # Ema farkı hesaplaması da numpy değeri üretebilir
         ema_diff = ind.get('ema_short') - ind.get('ema_long') if ind.get('ema_short') is not None and ind.get('ema_long') is not None else None
         data_list.extend([
             ind.get('rsi'),
