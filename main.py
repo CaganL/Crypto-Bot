@@ -388,11 +388,11 @@ def check_immediate_alert():
             direction = "BÜYÜK ALIM SİNYALİ GELDİ!" if current_strong_pos == "Long" else "BÜYÜK SATIM SİNYALİ GELDİ!"
             
             msg = (f"🚨🚨 **ANLIK GÜÇLÜ SİNYAL UYARISI!** 🚨🚨\n\n"
-                   f"**COIN:** {coin}\n"
-                   f"**SİNYAL:** {current_strong_pos} ({direction})\n"
-                   f"**GÜVEN SKORU:** {confidence:.0f}%\n"
-                   f"**ANLIK FİYAT:** {current_price:.2f} USDT\n\n"
-                   f"*(Not: Bu sinyal, AI skorunun $\ge 3.0$ veya $\le -3.0$ olduğu için hemen gönderilmiştir.)*")
+                      f"**COIN:** {coin}\n"
+                      f"**SİNYAL:** {current_strong_pos} ({direction})\n"
+                      f"**GÜVEN SKORU:** {confidence:.0f}%\n"
+                      f"**ANLIK FİYAT:** {current_price:.2f} USDT\n\n"
+                      f"*(Not: Bu sinyal, AI skorunun $\ge 3.0$ veya $\le -3.0$ olduğu için hemen gönderilmiştir.)*")
             
             send_telegram_message(msg)
             
@@ -462,6 +462,9 @@ def analyze_and_alert():
 if __name__ == "__main__":
     # Bot çalışmaya başlamadan önce tabloyu kontrol et/oluştur
     create_ml_table()
+    
+    # 🚨 KRİTİK EKLENTİ: Bot her başladığında hemen bir kereliğine analiz ve kaydı zorla
+    analyze_and_alert()
     
     # Scheduler ayarları
     schedule.every(1).hour.do(analyze_and_alert)      
