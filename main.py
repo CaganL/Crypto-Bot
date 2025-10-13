@@ -256,9 +256,10 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
 
     # 1. Günlük (1d) Trend (+/- 2.5)
     d1_ind = multi_indicators.get("1d", {})
-    if d1_ind.get('ema_short') > d1_ind.get('ema_long', 0): score += 2.5 
-    elif d1_ind.get('ema_short') < d1_ind.get('ema_long', 0): score -= 2.5 
-        
+    if d1_ind.get('ema_short') is not None and d1_ind.get('ema_long') is not None:
+        if d1_ind.get('ema_short') > d1_ind.get('ema_long'): score += 2.5 
+        elif d1_ind.get('ema_short') < d1_ind.get('ema_long'): score -= 2.5 
+            
     # 2. 4 Saatlik (4h) Momentum (+/- 1.5)
     h4_ind = multi_indicators.get("4h", {})
     if h4_ind.get('rsi') is not None:
@@ -309,7 +310,7 @@ def check_price_spike(symbol, current_price):
     last_prices[symbol] = current_price
 
 # -------------------------------
-# YENİ FONKSİYON: PostgreSQL'e Kayıt
+# YENİ FONKSİYON: PostgreSQL'e Kayıt (Düzeltildi)
 # -------------------------------
 def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
     conn = get_db_connection()
@@ -326,7 +327,7 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
 
     for interval in ["1d", "4h", "1h", "15m"]:
         ind = multi_indicators.get(interval, {})
-        ema_diff = ind.get('ema_short', 0) - ind.get('ema_long', 0)
+        ema_diff = ind.get('ema_short') - ind.get('ema_long') if ind.get('ema_short') is not None and ind.get('ema_long') is not None else None
         data_list.extend([
             ind.get('rsi'),
             ind.get('macd_diff'),
@@ -334,6 +335,21 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
         ])
     
     data_list.extend([cg_data.get('long_ratio'), cg_data.get('short_ratio')])
+
+    # 🚨🚨 KRİTİK DÜZELTME: NumPy (np) tiplerini standart Python tiplerine çevirme
+    final_data_list = []
+    for item in data_list:
+        # datetime, str, int, float veya None ise direkt ekle
+        if item is None or isinstance(item, (float, int, str, datetime)):
+            final_data_list.append(item)
+        else:
+            try:
+                # np.float64 gibi tipleri float'a dönüştür
+                final_data_list.append(float(item))
+            except (ValueError, TypeError):
+                # Dönüştürülemezse None olarak ekle
+                final_data_list.append(None) 
+    # 🚨🚨 DÜZELTME SONU 🚨🚨
 
     # SQL komutu hazırlama
     columns = [
@@ -349,7 +365,8 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
     insert_command = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({values_placeholder})"
     
     try:
-        cursor.execute(insert_command, data_list)
+        # final_data_list kullanılır
+        cursor.execute(insert_command, final_data_list)
         conn.commit()
         logger.info(f"{coin} için ML verisi veritabanına kaydedildi.")
     except Exception as e:
@@ -444,10 +461,10 @@ def analyze_and_alert():
         h4_trend = "🔼 Yukarı" if h4_indicators.get('ema_short', 0) > h4_indicators.get('ema_long', 0) else "🔽 Aşağı"
         msg += f"**H4 RSI:** {rsi_4h:.1f} | **H4 EMA:** {h4_trend}\n"
         
-        if cg_data["long_ratio"] is not None and cg_data["short_ratio"] is not None:
+        if cg_data and cg_data.get("long_ratio") is not None and cg_data.get("short_ratio") is not None:
             long_short_ratio_msg = f"{cg_data['long_ratio']*100:.1f}% Long / {cg_data['short_ratio']*100:.1f}% Short"
             if cg_data['long_ratio'] > 0.65 or cg_data['short_ratio'] > 0.65:
-                 long_short_ratio_msg = f"⚠️ {long_short_ratio_msg} (Aşırı Duyarlılık!)"
+                long_short_ratio_msg = f"⚠️ {long_short_ratio_msg} (Aşırı Duyarlılık!)"
             msg += f"**L/S Oranı:** {long_short_ratio_msg}\n"
             
         alerts.append(msg)
@@ -467,7 +484,7 @@ if __name__ == "__main__":
     analyze_and_alert()
     
     # Scheduler ayarları
-    schedule.every(1).hour.do(analyze_and_alert)      
+    schedule.every(1).hour.do(analyze_and_alert)     
     schedule.every(15).minutes.do(check_immediate_alert)
 
     logger.info("Bot çalışıyor... Kalıcı veritabanı kaydı aktif ✅")
