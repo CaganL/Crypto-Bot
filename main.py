@@ -105,7 +105,7 @@ def create_ml_table():
         d1_rsi NUMERIC, d1_macd NUMERIC, d1_ema_diff NUMERIC,
         h4_rsi NUMERIC, h4_macd NUMERIC, h4_ema_diff NUMERIC,
         h1_rsi NUMERIC, h1_macd NUMERIC, h1_ema_diff NUMERIC,
-        m15_rsi NUMERIC, m15_macd NUM1ERIC, m15_ema_diff NUMERIC,
+        m15_rsi NUMERIC, m15_macd NUMERIC, m15_ema_diff NUMERIC,
         
         long_ratio NUMERIC,
         short_ratio NUMERIC
