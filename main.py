@@ -194,12 +194,10 @@ def fetch_multi_timeframe_analysis(symbol):
 # CoinGlass / Binance Fallback (HIZLANDIRILDI)
 # -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
-    # 🚀 KRİTİK HIZLANDIRMA: CoinGlass sürekli boş döndüğü için Binance verisine geçiş sağlandı.
     if not COINGLASS_API_KEY or True:
         logger.warning("CoinGlass atlandı, Binance Long/Short verisi kullanılıyor.")
         return fetch_binance_openinterest(symbol)
 
-    # Bu kısım artık çalışmayacaktır.
     for attempt in range(retries):
         try:
             url = f"https://open-api.coinglass.com/api/pro/v1/futures/openInterest?symbol={symbol}"
@@ -235,9 +233,24 @@ def fetch_binance_openinterest(symbol="BTC"):
         return {"long_ratio": None, "short_ratio": None, "funding_rate": None}
 
 # -------------------------------
+# YARDIMCI FONKSİYONLAR (LOAD/SAVE HISTORY)
+# -------------------------------
+history_file = "history.json"
+def load_history():
+    if os.path.exists(history_file):
+        with open(history_file, "r") as f:
+            try: return json.load(f)
+            except json.JSONDecodeError:
+                logger.warning(f"{history_file} dosyası bozuk, yeniden oluşturuluyor."); return {}
+    return {}
+
+def save_history(history):
+    with open(history_file, "w") as f: json.dump(history, f)
+
+
+# -------------------------------
 # ML MODEL YÜKLEME VE FALLBACK TANIMLARI
 # -------------------------------
-# ML Modelinin beklediği özellikler listesi
 ML_FEATURES = [
     'raw_score', 'd1_rsi', 'd1_macd', 'd1_ema_diff', 
     'h4_rsi', 'h4_macd', 'h4_ema_diff', 
@@ -258,18 +271,6 @@ except Exception as e:
 # YENİ FALLBACK FONKSİYONU (ESKİ KURALLARINIZ BURAYA TAŞINDI)
 def fallback_prediction(symbol, multi_indicators, cg_data=None):
     # Bu, ML modeli yüklenemediğinde çalışacak olan orijinal kural setinizdir.
-    history_file = "history.json"
-    def load_history():
-        if os.path.exists(history_file):
-            with open(history_file, "r") as f:
-                try: return json.load(f)
-                except json.JSONDecodeError:
-                    logger.warning(f"{history_file} dosyası bozuk, yeniden oluşturuluyor."); return {}
-        return {}
-    
-    def save_history(history):
-        with open(history_file, "w") as f: json.dump(history, f)
-        
     history = load_history(); score = 0
     
     # 0. 15 Dakikalık (15m) Erken Sinyal (+/- 0.5)
@@ -314,7 +315,6 @@ def fallback_prediction(symbol, multi_indicators, cg_data=None):
     else: position = "Neutral (Kural)"
 
     confidence = min(max(abs(score) / 5 * 100, 0), 100) # Confidence score calculation logic
-    history[symbol] = {"last_position": position.split()[0]}
     save_history(history)
     return position, confidence, score
 # -------------------------------
@@ -357,11 +357,11 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
 
     # 2. Tahmin Yapma
     prediction = ML_MODEL.predict(X_predict)[0] # Tahmin: 1 (Long), 0 (Neutral), veya -1 (Short)
-    
+
     # 3. Sonuçları Çevirme
     if prediction == 1:
         position = "Long (ML)"
-        confidence = 75 
+        confidence = 75 # ML Model tahmini olduğu için güveni yüksek tutuyoruz
         raw_score = 3.5 
     elif prediction == -1:
         position = "Short (ML)"
@@ -373,10 +373,9 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
         raw_score = 0
         
     # Kural tabanlı sistemdeki history.json güncelleme mantığını koruyalım
-    history_file = "history.json"
     history = load_history()
     history[symbol] = {"last_position": position.split()[0]}
-    # NOT: load_history ve save_history fonksiyonları dosyanın başında tanımlı olmalı.
+    save_history(history)
     
     return position, confidence, raw_score
 
