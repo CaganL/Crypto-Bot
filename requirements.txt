@@ -9,3 +9,5 @@ praw
 tweepy
 python-dotenv
 psycopg2-binary
+pandas
+joblib
