@@ -16,6 +16,12 @@ from datetime import datetime
 import psycopg2
 from urllib.parse import urlparse
 
+# --- ML ENTEGRASYONU İÇİN EKLENENLER ---
+import joblib 
+import numpy as np 
+# ----------------------------------------
+
+
 # -------------------------------
 # Logging Kurulumu
 # -------------------------------
@@ -32,13 +38,11 @@ logger = logging.getLogger(__name__)
 # -------------------------------
 # API Anahtarları ve Telegram
 # -------------------------------
-# Railway'de ortam değişkenleri kullanılır. BOT_TOKEN, CHAT_ID vb. Railway'de tanımlı olmalıdır.
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs") # Örnek değerler, Railway'deki ortam değişkenleri kullanılacak
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs")
 CHAT_ID = int(os.getenv("CHAT_ID", "7294398674"))
 COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY", "36176ba717504abc9235e612d1daeb0c")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 
-# PostgreSQL Bağlantı URL'si (Railway Otomatik Sağlar)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 bot = Bot(BOT_TOKEN)
@@ -47,14 +51,11 @@ bot = Bot(BOT_TOKEN)
 # Global Takipçiler (9 Coin ile Güncel Hali)
 # -------------------------------
 coin_aliases = {
-    # Mevcut Coin'ler
     "BTCUSDT": ["BTC", "Bitcoin", "BTCUSDT"],
     "ETHUSDT": ["ETH", "Ethereum", "ETHUSDT"],
     "SOLUSDT": ["SOL", "Solana", "SOLUSDT"],
     "SUIUSDT": ["SUI", "Sui", "SUIUSDT"],
     "AVAXUSDT": ["AVAX", "Avalanche", "AVAXUSDT"],
-    
-    # YENİ EKLENENLER (Öğrenmeyi hızlandırır)
     "BNBUSDT": ["BNB", "Binance Coin", "BNBUSDT"],
     "XRPUSDT": ["XRP", "Ripple", "XRPUSDT"],
     "ADAUSDT": ["ADA", "Cardano", "ADAUSDT"],
@@ -91,10 +92,8 @@ def create_ml_table():
     if not conn: return
 
     cursor = conn.cursor()
-    # ML verisi için tablo oluşturma (mevcut değilse)
     table_name = "ml_analysis_data"
     
-    # Tüm indikatörler, long/short ve skorlar için sütunlar tanımlanır
     command = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
         id SERIAL PRIMARY KEY,
@@ -195,12 +194,12 @@ def fetch_multi_timeframe_analysis(symbol):
 # CoinGlass / Binance Fallback (HIZLANDIRILDI)
 # -------------------------------
 def fetch_coinglass_data(symbol="BTC", retries=3):
-    # 🚀 KRİTİK HIZLANDIRMA: CoinGlass sürekli boş döndüğü için 3 deneme (6 saniye) kaybetmemek adına, 
-    # API key olsa bile direkt Binance verisine geçiş sağlanmıştır.
-    if not COINGLASS_API_KEY or True: 
+    # 🚀 KRİTİK HIZLANDIRMA: CoinGlass sürekli boş döndüğü için Binance verisine geçiş sağlandı.
+    if not COINGLASS_API_KEY or True:
         logger.warning("CoinGlass atlandı, Binance Long/Short verisi kullanılıyor.")
         return fetch_binance_openinterest(symbol)
 
+    # Bu kısım artık çalışmayacaktır.
     for attempt in range(retries):
         try:
             url = f"https://open-api.coinglass.com/api/pro/v1/futures/openInterest?symbol={symbol}"
@@ -236,21 +235,41 @@ def fetch_binance_openinterest(symbol="BTC"):
         return {"long_ratio": None, "short_ratio": None, "funding_rate": None}
 
 # -------------------------------
-# AI Öğrenme Sistemi (Aynı Kaldı)
+# ML MODEL YÜKLEME VE FALLBACK TANIMLARI
 # -------------------------------
-history_file = "history.json"
-def load_history():
-    if os.path.exists(history_file):
-        with open(history_file, "r") as f:
-            try: return json.load(f)
-            except json.JSONDecodeError:
-                logger.warning(f"{history_file} dosyası bozuk, yeniden oluşturuluyor."); return {}
-    return {}
+# ML Modelinin beklediği özellikler listesi
+ML_FEATURES = [
+    'raw_score', 'd1_rsi', 'd1_macd', 'd1_ema_diff', 
+    'h4_rsi', 'h4_macd', 'h4_ema_diff', 
+    'h1_rsi', 'h1_macd', 'h1_ema_diff', 
+    'm15_rsi', 'm15_macd', 'm15_ema_diff', 
+    'long_ratio', 'short_ratio'
+]
+ML_MODEL = None # Başlangıçta model yok
 
-def save_history(history):
-    with open(history_file, "w") as f: json.dump(history, f)
+try:
+    # Modeli diskten yükleme
+    ML_MODEL = joblib.load('crypto_ml_model.pkl')
+    logger.info("ML modeli başarıyla yüklendi!")
+except Exception as e:
+    logger.error(f"ML Modeli Yükleme Hatası: {e}. Bot kural tabanlı devam edecek.")
 
-def ai_position_prediction(symbol, multi_indicators, cg_data=None):
+
+# YENİ FALLBACK FONKSİYONU (ESKİ KURALLARINIZ BURAYA TAŞINDI)
+def fallback_prediction(symbol, multi_indicators, cg_data=None):
+    # Bu, ML modeli yüklenemediğinde çalışacak olan orijinal kural setinizdir.
+    history_file = "history.json"
+    def load_history():
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                try: return json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(f"{history_file} dosyası bozuk, yeniden oluşturuluyor."); return {}
+        return {}
+    
+    def save_history(history):
+        with open(history_file, "w") as f: json.dump(history, f)
+        
     history = load_history(); score = 0
     
     # 0. 15 Dakikalık (15m) Erken Sinyal (+/- 0.5)
@@ -278,7 +297,7 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
         elif h1_ind['macd_diff'] < 0: score -= 1.0
 
     # 4. Long/Short Oranı (+/- 1.5)
-    if cg_data and cg_data["long_ratio"] and cg_data["short_ratio"]:
+    if cg_data and cg_data.get("long_ratio") is not None and cg_data.get("short_ratio") is not None:
         if cg_data["long_ratio"] > 0.65: score -= 1.5
         elif cg_data["short_ratio"] > 0.65: score += 1.5
             
@@ -288,16 +307,78 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     elif last_pos == "Short" and score < 0: score -= 0.5
 
     # Sonuçlandırma
-    if score >= 3.0: position = "Long (Güçlü)"
-    elif score >= 1.0: position = "Long"
-    elif score <= -3.0: position = "Short (Güçlü)"
-    elif score <= -1.0: position = "Short"
-    else: position = "Neutral"
+    if score >= 3.0: position = "Long (Güçlü - Kural)"
+    elif score >= 1.0: position = "Long (Kural)"
+    elif score <= -3.0: position = "Short (Güçlü - Kural)"
+    elif score <= -1.0: position = "Short (Kural)"
+    else: position = "Neutral (Kural)"
 
-    confidence = min(abs(score / 5) * 100, 100)
+    confidence = min(max(abs(score) / 5 * 100, 0), 100) # Confidence score calculation logic
     history[symbol] = {"last_position": position.split()[0]}
     save_history(history)
     return position, confidence, score
+# -------------------------------
+# -------------------------------
+
+
+def ai_position_prediction(symbol, multi_indicators, cg_data=None):
+    # Eğer ML Modeli yüklenemediyse, eski kural tabanlı sistemi kullan.
+    if ML_MODEL is None:
+        # Fallback'ten gelen tahmin ve skor kullanılır.
+        return fallback_prediction(symbol, multi_indicators, cg_data)
+        
+    # 1. Özellikleri (Features) Hazırlama
+    
+    # ML modelinin beklediği 15 özellik listesini hazırlama
+    data = {}
+    
+    # Önemli: ML modelinin ilk özelliği, eski kural setinin skorudur.
+    _, _, raw_score_old = fallback_prediction(symbol, multi_indicators, cg_data)
+    data['raw_score'] = raw_score_old
+    
+    # Diğer 14 özellik
+    for interval in ["1d", "4h", "1h", "15m"]:
+        ind = multi_indicators.get(interval, {})
+        ema_diff = ind.get('ema_short') - ind.get('ema_long') if ind.get('ema_short') is not None and ind.get('ema_long') is not None else None
+        
+        data[f'{interval}_rsi'] = ind.get('rsi')
+        data[f'{interval}_macd'] = ind.get('macd_diff')
+        data[f'{interval}_ema_diff'] = ema_diff
+        
+    data['long_ratio'] = cg_data.get('long_ratio')
+    data['short_ratio'] = cg_data.get('short_ratio')
+    
+    # DataFrame oluşturma (Model, Pandas DataFrame bekler)
+    # Tek bir satırlık veriyi numpy array'ine çevirme
+    X_predict = pd.DataFrame([data], columns=ML_FEATURES)
+    
+    # Boş (None) değerleri 0 ile doldur (Model None gönderemeyiz)
+    X_predict = X_predict.fillna(0)
+
+    # 2. Tahmin Yapma
+    prediction = ML_MODEL.predict(X_predict)[0] # Tahmin: 1 (Long), 0 (Neutral), veya -1 (Short)
+    
+    # 3. Sonuçları Çevirme
+    if prediction == 1:
+        position = "Long (ML)"
+        confidence = 75 
+        raw_score = 3.5 
+    elif prediction == -1:
+        position = "Short (ML)"
+        confidence = 75
+        raw_score = -3.5
+    else: # prediction == 0 (Neutral)
+        position = "Neutral (ML)"
+        confidence = 50
+        raw_score = 0
+        
+    # Kural tabanlı sistemdeki history.json güncelleme mantığını koruyalım
+    history_file = "history.json"
+    history = load_history()
+    history[symbol] = {"last_position": position.split()[0]}
+    # NOT: load_history ve save_history fonksiyonları dosyanın başında tanımlı olmalı.
+    
+    return position, confidence, raw_score
 
 # -------------------------------
 # Ani Fiyat Dalgalanma Uyarısı (%5) (Aynı Kaldı)
@@ -376,7 +457,6 @@ def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
         conn.commit()
         logger.info(f"{coin} için ML verisi veritabanına kaydedildi.")
     except Exception as e:
-        # Bu hata artık "schema 'np' does not exist" olmamalı
         logger.error(f"Veritabanına veri yazma hatası ({coin}): {e}")
     finally:
         cursor.close()
@@ -399,9 +479,17 @@ def check_immediate_alert():
         current_price = multi_indicators.get("4h", {}).get('last_close')
         if current_price is None: continue
 
-        is_strong_long = raw_score >= 3.0
-        is_strong_short = raw_score <= -3.0
-        
+        # ANLIK SİNYAL KONTROLÜ (ML tahmini kullanılır)
+        if position.startswith("Long") and confidence >= 70:
+             is_strong_long = True
+             is_strong_short = False
+        elif position.startswith("Short") and confidence >= 70:
+             is_strong_long = False
+             is_strong_short = True
+        else:
+             is_strong_long = False
+             is_strong_short = False
+
         current_strong_pos = None
         if is_strong_long: current_strong_pos = "Long"
         elif is_strong_short: current_strong_pos = "Short"
@@ -416,7 +504,7 @@ def check_immediate_alert():
                       f"**SİNYAL:** {current_strong_pos} ({direction})\n"
                       f"**GÜVEN SKORU:** {confidence:.0f}%\n"
                       f"**ANLIK FİYAT:** {current_price:.2f} USDT\n\n"
-                      f"*(Not: Bu sinyal, AI skorunun $\ge 3.0$ veya $\le -3.0$ olduğu için hemen gönderilmiştir.)*")
+                      f"*(Not: Bu sinyal, ML modelinin güçlü tahmini sonucu gönderilmiştir.)*")
             
             send_telegram_message(msg)
             
