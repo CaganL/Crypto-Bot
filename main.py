@@ -324,7 +324,6 @@ def fallback_prediction(symbol, multi_indicators, cg_data=None):
 def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     # Eğer ML Modeli yüklenemediyse, eski kural tabanlı sistemi kullan.
     if ML_MODEL is None:
-        # Fallback'ten gelen tahmin ve skor kullanılır.
         return fallback_prediction(symbol, multi_indicators, cg_data)
         
     # 1. Özellikleri (Features) Hazırlama
@@ -356,46 +355,235 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
 
     # 2. Tahmin Yapma
     prediction = ML_MODEL.predict(X_predict)[0] # Tahmin: 1 (Long), 0 (Neutral), veya -1 (Short)
-    
-    # 3. Sonuçları Yorumlama ve Filtreleme (YENİ MANTIK)
-    
-    # Modelin her bir sınıfa olan güvenini (olasılığını) al.
-    try:
-        probabilities = ML_MODEL.predict_proba(X_predict)[0]
-    except Exception as e:
-        logger.warning(f"predict_proba hatası: {e}. Sabit güven skoru kullanılıyor.")
-        probabilities = [0.33, 0.34, 0.33] # Varsayılan dağılım
-        
-    # Tahmin edilen sınıfın olasılığını bul (Long=1, Neutral=0, Short=-1)
-    if prediction == 1:
-        confidence = probabilities[2] # Long sınıfının olasılığı (RandomForest sınıf dizini: -1=0, 0=1, 1=2)
-        position_str = "Long (ML)"
-    elif prediction == -1:
-        confidence = probabilities[0] # Short sınıfının olasılığı
-        position_str = "Short (ML)"
-    else: # prediction == 0 (Neutral)
-        confidence = probabilities[1] # Neutral sınıfının olasılığı
-        position_str = "Neutral (ML)"
-    
-    confidence_pct = confidence * 100
-    raw_score = 0 # Ham skor artık sadece raporlama için kullanılır
-    
-    # D1 Trendini tekrar alalım (ANA GÜVENLİK FİLTRESİ)
-    d1_ind = multi_indicators.get("1d", {})
-    is_d1_trend_up = d1_ind.get('ema_short', 0) > d1_ind.get('ema_long', 0)
-    is_d1_trend_down = d1_ind.get('ema_short', 0) < d1_ind.get('ema_long', 0)
-    
-    # FİLTRELEME MANTIĞI: ML tahmini Ana Trendin tersi ise, güveni düşür veya Nötr yap.
-    if (position_str.startswith("Long") and is_d1_trend_down) or \
-       (position_str.startswith("Short") and is_d1_trend_up):
-        
-        position_str = "Neutral (Filtre)" # Ters trendde Nötr sinyaline düşür
-        confidence_pct = max(confidence_pct - 30, 40) # Güven skorunu 30 puan düşür, minimum 40 olsun
 
-    
-    # Sonuçlandırma için history.json güncelleme
+    # 3. Sonuçları Çevirme
+    if prediction == 1:
+        position = "Long (ML)"
+        confidence = 75 # ML Model tahmini olduğu için güveni yüksek tutuyoruz
+        raw_score = 3.5 
+    elif prediction == -1:
+        position = "Short (ML)"
+        confidence = 75
+        raw_score = -3.5
+    else: # prediction == 0 (Neutral)
+        position = "Neutral (ML)"
+        confidence = 50
+        raw_score = 0
+        
+    # Kural tabanlı sistemdeki history.json güncelleme mantığını koruyalım
     history = load_history()
-    history[symbol] = {"last_position": position_str.split()[0]}
+    history[symbol] = {"last_position": position.split()[0]}
     save_history(history)
     
-    return position_str, confidence_pct, raw_score
+    return position, confidence, raw_score
+
+# -------------------------------
+# Ani Fiyat Dalgalanma Uyarısı (%5) (Aynı Kaldı)
+# -------------------------------
+def check_price_spike(symbol, current_price):
+    global last_prices
+    if current_price is None: return
+    if symbol in last_prices:
+        old_price = last_prices[symbol]
+        change_pct = ((current_price - old_price) / old_price) * 100
+        if abs(change_pct) >= 5:
+            direction = "📈 YÜKSELDİ" if change_pct > 0 else "📉 DÜŞTÜ"
+            msg = f"⚠️ **{symbol} Fiyat Uyarısı (ŞOK!):**\nFiyat son kontrolünden beri %{change_pct:.2f} {direction}!\nAnlık Fiyat: {current_price:.2f} USDT"
+            send_telegram_message(msg)
+    last_prices[symbol] = current_price
+
+# -------------------------------
+# YENİ FONKSİYON: PostgreSQL'e Kayıt (KESİN DÜZELTME)
+# -------------------------------
+def save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score):
+    conn = get_db_connection()
+    if not conn: return
+    
+    cursor = conn.cursor()
+    table_name = "ml_analysis_data"
+    
+    current_time = datetime.now()
+    current_price = multi_indicators.get("4h", {}).get('last_close')
+    
+    # 1. Ham verileri toplama
+    data_list = [current_time, coin, current_price, raw_score]
+
+    for interval in ["1d", "4h", "1h", "15m"]:
+        ind = multi_indicators.get(interval, {})
+        # Ema farkı hesaplaması da numpy değeri üretebilir
+        ema_diff = ind.get('ema_short') - ind.get('ema_long') if ind.get('ema_short') is not None and ind.get('ema_long') is not None else None
+        data_list.extend([
+            ind.get('rsi'),
+            ind.get('macd_diff'),
+            ema_diff
+        ])
+    
+    data_list.extend([cg_data.get('long_ratio'), cg_data.get('short_ratio')])
+
+    # 🚨🚨 KRİTİK DÜZELTME: Tüm sayısal verileri zorla Python float'a çevirme
+    final_data_list = []
+    for item in data_list:
+        # String, datetime veya None ise dokunma
+        if item is None or isinstance(item, (str, datetime)):
+            final_data_list.append(item)
+        else:
+            try:
+                # Gelen her sayısal değeri (Python float, int, NumPy float64) float'a dönüştür
+                final_data_list.append(float(item))
+            except (ValueError, TypeError):
+                # Dönüştürülemezse None olarak ekle
+                final_data_list.append(None)
+    # 🚨🚨 KESİN DÜZELTME SONU 🚨🚨
+
+    # SQL komutu hazırlama
+    columns = [
+        'timestamp', 'symbol', 'price', 'raw_score',
+        'd1_rsi', 'd1_macd', 'd1_ema_diff',
+        'h4_rsi', 'h4_macd', 'h4_ema_diff',
+        'h1_rsi', 'h1_macd', 'h1_ema_diff',
+        'm15_rsi', 'm15_macd', 'm15_ema_diff',
+        'long_ratio', 'short_ratio'
+    ]
+    
+    values_placeholder = ', '.join(['%s'] * len(columns))
+    insert_command = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({values_placeholder})"
+    
+    try:
+        # DÜZELTİLMİŞ final_data_list'i kullan
+        cursor.execute(insert_command, final_data_list)
+        conn.commit()
+        logger.info(f"{coin} için ML verisi veritabanına kaydedildi.")
+    except Exception as e:
+        logger.error(f"Veritabanına veri yazma hatası ({coin}): {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------------
+# ANLIK SİNYAL KONTROLÜ (Aynı Kaldı)
+# -------------------------------
+def check_immediate_alert():
+    global last_strong_alert
+    
+    for coin in coin_aliases.keys():
+        coin_short = coin.replace("USDT", "")
+        
+        multi_indicators = fetch_multi_timeframe_analysis(coin)
+        cg_data = fetch_coinglass_data(coin_short)
+        position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
+        
+        # ... (Anlık uyarı mantığı aynı kalır) ...
+        current_price = multi_indicators.get("4h", {}).get('last_close')
+        if current_price is None: continue
+
+        # ANLIK SİNYAL KONTROLÜ (ML tahmini kullanılır)
+        if position.startswith("Long") and confidence >= 70:
+             is_strong_long = True
+             is_strong_short = False
+        elif position.startswith("Short") and confidence >= 70:
+             is_strong_long = False
+             is_strong_short = True
+        else:
+             is_strong_long = False
+             is_strong_short = False
+
+        current_strong_pos = None
+        if is_strong_long: current_strong_pos = "Long"
+        elif is_strong_short: current_strong_pos = "Short"
+            
+        last_sent_pos = last_strong_alert.get(coin, "Neutral")
+        
+        if current_strong_pos and current_strong_pos != last_sent_pos:
+            direction = "BÜYÜK ALIM SİNYALİ GELDİ!" if current_strong_pos == "Long" else "BÜYÜK SATIM SİNYALİ GELDİ!"
+            
+            msg = (f"🚨🚨 **ANLIK GÜÇLÜ SİNYAL UYARISI!** 🚨🚨\n\n"
+                      f"**COIN:** {coin}\n"
+                      f"**SİNYAL:** {current_strong_pos} ({direction})\n"
+                      f"**GÜVEN SKORU:** {confidence:.0f}%\n"
+                      f"**ANLIK FİYAT:** {current_price:.2f} USDT\n\n"
+                      f"*(Not: Bu sinyal, ML modelinin güçlü tahmini sonucu gönderilmiştir.)*")
+            
+            send_telegram_message(msg)
+            
+            last_strong_alert[coin] = current_strong_pos
+            logger.info(f"Anlık güçlü sinyal gönderildi: {coin} -> {current_strong_pos}")
+        
+        elif current_strong_pos is None and last_sent_pos != "Neutral":
+            last_strong_alert[coin] = "Neutral"
+            logger.info(f"{coin} güçlü sinyal durumu nötrlendi.")
+
+# -------------------------------
+# Ana Analiz Fonksiyonu (Periyodik Rapor)
+# -------------------------------
+def analyze_and_alert():
+    logger.info("Analiz döngüsü başlatılıyor.")
+    alerts = []
+    
+    for coin in coin_aliases.keys():
+        coin_short = coin.replace("USDT", "")
+        
+        multi_indicators = fetch_multi_timeframe_analysis(coin)
+        h4_indicators = multi_indicators.get("4h", {})
+        current_price = h4_indicators.get('last_close')
+        price_change_4h = h4_indicators.get('price_change', 0)
+        rsi_4h = h4_indicators.get('rsi')
+
+        if current_price is None: continue
+        
+        check_price_spike(coin, current_price)
+        cg_data = fetch_coinglass_data(coin_short)
+        position, confidence, raw_score = ai_position_prediction(coin, multi_indicators, cg_data)
+
+        # -----------------------------
+        # ML VERİ KAYIT ADIMI (Veritabanı)
+        # -----------------------------
+        save_ml_data_to_db(coin, multi_indicators, cg_data, raw_score)
+
+        # Rapor Mesajı (Telegram'a gönderilecek)
+        msg = f"--- 🤖 **{coin} Çoklu Zaman Dilimi Raporu** ---\n"
+        msg += f"💰 **Fiyat:** {current_price:.2f} USDT ({price_change_4h:+.2f}% son 4 saatte)\n"
+        msg += f"🔥 **AI Tahmini:** **{position}**\n"
+        msg += f"📊 **Güven Skoru:** **{confidence:.0f}%** (Skor: {raw_score:+.1f})\n"
+        msg += "\n--- DETAYLI ANALİZ ---\n"
+        
+        d1_ind = multi_indicators.get("1d", {})
+        d1_trend = "🔼 Güçlü YUKARI" if d1_ind.get('ema_short', 0) > d1_ind.get('ema_long', 0) else "🔽 Güçlü AŞAĞI"
+        msg += f"**D1 TREND (Ana Yön):** {d1_trend}\n"
+        
+        h4_trend = "🔼 Yukarı" if h4_indicators.get('ema_short', 0) > h4_indicators.get('ema_long', 0) else "🔽 Aşağı"
+        msg += f"**H4 RSI:** {rsi_4h:.1f} | **H4 EMA:** {h4_trend}\n"
+        
+        if cg_data and cg_data.get("long_ratio") is not None and cg_data.get("short_ratio") is not None:
+            long_short_ratio_msg = f"{cg_data['long_ratio']*100:.1f}% Long / {cg_data['short_ratio']*100:.1f}% Short"
+            if cg_data['long_ratio'] > 0.65 or cg_data['short_ratio'] > 0.65:
+                long_short_ratio_msg = f"⚠️ {long_short_ratio_msg} (Aşırı Duyarlılık!)"
+            msg += f"**L/S Oranı:** {long_short_ratio_msg}\n"
+            
+        alerts.append(msg)
+
+    full_message = "\n\n" + "\n\n".join(alerts)
+    send_telegram_message(full_message)
+    logger.info("Analiz döngüsü tamamlandı.")
+
+# -------------------------------
+# Bot Başlangıç ve Scheduler
+# -------------------------------
+if __name__ == "__main__":
+    # Bot çalışmaya başlamadan önce tabloyu kontrol et/oluştur
+    create_ml_table()
+    
+    # 🚨 KRİTİK EKLENTİ: Bot her başladığında hemen bir kereliğine analiz ve kaydı zorla
+    analyze_and_alert()
+    
+    # Scheduler ayarları
+    schedule.every(1).hour.do(analyze_and_alert)
+    schedule.every(15).minutes.do(check_immediate_alert)
+
+    logger.info("Bot çalışıyor... Kalıcı veritabanı kaydı aktif ✅")
+
+    while True:
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            logger.error(f"Scheduler çalışma hatası: {e}")
+        time.sleep(60)
