@@ -30,7 +30,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("bot.log"),
-        logging.StreamHandler() # <-- DÜZELTİLDİ: logging.StreamHandler() olmalıydı
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -324,12 +324,9 @@ def fallback_prediction(symbol, multi_indicators, cg_data=None):
 def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     # Eğer ML Modeli yüklenemediyse, eski kural tabanlı sistemi kullan.
     if ML_MODEL is None:
-        # Fallback'ten gelen tahmin ve skor kullanılır.
         return fallback_prediction(symbol, multi_indicators, cg_data)
         
     # 1. Özellikleri (Features) Hazırlama
-    
-    # ML modelinin beklediği 15 özellik listesini hazırlama
     data = {}
     
     # Önemli: ML modelinin ilk özelliği, eski kural setinin skorudur.
@@ -348,38 +345,35 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     data['long_ratio'] = cg_data.get('long_ratio')
     data['short_ratio'] = cg_data.get('short_ratio')
     
-    # DataFrame oluşturma (Model, Pandas DataFrame bekler)
-    # Tek bir satırlık veriyi numpy array'ine çevirme
+    # DataFrame oluşturma
     X_predict = pd.DataFrame([data], columns=ML_FEATURES)
-    
-    # Boş (None) değerleri 0 ile doldur (Model None gönderemeyiz)
     X_predict = X_predict.fillna(0)
 
     # 2. Tahmin Yapma
     prediction = ML_MODEL.predict(X_predict)[0] # Tahmin: 1 (Long), 0 (Neutral), veya -1 (Short)
     
-    # 3. Sonuçları Yorumlama ve Filtreleme (YENİ MANTIK)
+    # 3. Sonuçları Çevirme ve Dinamik Olasılığı Hesaplama (YENİ GÜVEN & FİLTRE)
     
     # Modelin her bir sınıfa olan güvenini (olasılığını) al.
     try:
         probabilities = ML_MODEL.predict_proba(X_predict)[0]
     except Exception as e:
-        logger.warning(f"predict_proba hatası: {e}. Sabit güven skoru kullanılıyor.")
-        probabilities = [0.33, 0.34, 0.33] # Varsayılan dağılım
+        logger.warning(f"predict_proba hatası: {e}. Varsayılan güven kullanılıyor.")
+        probabilities = [0.33, 0.34, 0.33] 
         
-    # Tahmin edilen sınıfın olasılığını bul (Long=1, Neutral=0, Short=-1)
+    # Tahmin edilen sınıfın olasılığını bul (RandomForest dizinleri: 0->Short, 1->Neutral, 2->Long)
     if prediction == 1:
-        confidence = probabilities[2] # Long sınıfının olasılığı
+        confidence = probabilities[2] 
         position_str = "Long (ML)"
     elif prediction == -1:
-        confidence = probabilities[0] # Short sınıfının olasılığı
+        confidence = probabilities[0]
         position_str = "Short (ML)"
     else: # prediction == 0 (Neutral)
-        confidence = probabilities[1] # Neutral sınıfının olasılığı
+        confidence = probabilities[1]
         position_str = "Neutral (ML)"
     
     confidence_pct = confidence * 100
-    raw_score = 0 # Ham skor artık sadece raporlama için kullanılır
+    raw_score = 0 
     
     # D1 Trendini tekrar alalım (ANA GÜVENLİK FİLTRESİ)
     d1_ind = multi_indicators.get("1d", {})
@@ -390,8 +384,8 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     if (position_str.startswith("Long") and is_d1_trend_down) or \
        (position_str.startswith("Short") and is_d1_trend_up):
         
-        position_str = "Neutral (Filtre)" # Ters trendde Nötr sinyaline düşür
-        confidence_pct = max(confidence_pct - 30, 40) # Güven skorunu 30 puan düşür, minimum 40 olsun
+        position_str = "Neutral (Trend Filtre)" 
+        confidence_pct = max(confidence_pct - 30, 40) # Güven skorunu ciddi şekilde düşür
 
     
     # Sonuçlandırma için history.json güncelleme
@@ -399,8 +393,8 @@ def ai_position_prediction(symbol, multi_indicators, cg_data=None):
     history[symbol] = {"last_position": position_str.split()[0]}
     save_history(history)
     
-    # Raw_score sadece raporlama için kullanılır.
-    if confidence_pct >= 70:
+    # Raw_score sadece raporlama için kullanılır (Görsel amaçlı)
+    if confidence_pct >= 60:
         raw_score = 3.5 if position_str.startswith("Long") else (-3.5 if position_str.startswith("Short") else 0)
     
     return position_str, confidence_pct, raw_score
