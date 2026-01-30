@@ -59,7 +59,6 @@ def analyze_market(symbol):
 
     current_price = df_4h['close'].iloc[-1]
     
-    # İndikatörler
     ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
     rsi_series = calculate_rsi(df_4h['close'], 14)
     rsi_4h = rsi_series.iloc[-1]
@@ -67,7 +66,6 @@ def analyze_market(symbol):
     current_vol = df_4h['volume'].iloc[-1]
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
 
-    # Puanlama
     score = 0
     diff_percent = ((current_price - ema_50) / ema_50) * 100
     
@@ -114,7 +112,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (DÜZELTİLEN KISIM: GARANTİ ADRES) ---
+# --- AI YORUMU (V5.1 - PRO ÖNCELİKLİ) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
@@ -125,35 +123,49 @@ async def get_ai_comment(data, news):
         f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
     )
     
-    # BURAYI DEĞİŞTİRDİK: 'gemini-1.5-flash' yerine 'gemini-pro' yaptık.
-    # Bu adres her zaman çalışır.
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    # SENİN İSTEĞİN ÜZERİNE GÜNCELLENEN SIRALAMA:
+    # 1. Önce en zeki modeli dene (Pro)
+    # 2. Olmazsa hızlıyı dene (Flash)
+    # 3. O da olmazsa eskiyi dene (1.0 Pro)
+    models_to_try = [
+        "gemini-1.5-pro",   # <-- İLK SIRADA ARTIK BU VAR
+        "gemini-1.5-flash", 
+        "gemini-1.0-pro"
+    ]
     
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
+    last_error = ""
 
-    try:
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            result = response.json()
-            try:
-                return result['candidates'][0]['content']['parts'][0]['text']
-            except (KeyError, IndexError):
-                 return "⚠️ AI cevabı anlaşılamadı."
-        else:
-            # Hata detayını artık görebileceğiz
-            return f"⚠️ API Hatası ({response.status_code}): {response.text[:100]}"
-    except Exception as e:
-        return f"⚠️ Bağlantı Hatası: {str(e)}"
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+
+        try:
+            response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                result = response.json()
+                try:
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    # Hangi modelin cevap verdiğini de yazdıralım ki bilelim
+                    return f"🧠 (Model: {model_name})\n{text}"
+                except:
+                    last_error = "Cevap formatı bozuk."
+            else:
+                last_error = f"{model_name} Hatası: {response.status_code}"
+                continue 
+                
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    return f"⚠️ Tüm modeller denendi. Hata: {last_error}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} için Yapay Zeka devreye giriyor...")
+    await update.message.reply_text(f"🔍 {symbol} için en iyi Yapay Zeka aranıyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı.")
@@ -164,7 +176,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V4.1 - Stable URL)*\n"
+        f"💎 *{symbol} ANALİZ (V5.1 - Pro First)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
