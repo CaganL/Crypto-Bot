@@ -8,8 +8,8 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import os
 
 # --- AYARLAR ---
-TELEGRAM_TOKEN = "BURAYA_TELEGRAM_TOKEN_GELECEK"
-# CRYPTOPANIC_API_KEY satırını sildik, artık gerek yok!
+# Senin gönderdiğin token buraya eklendi:
+TELEGRAM_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
 
 SYMBOL_TIMEFRAME = '4h'
 
@@ -26,7 +26,7 @@ def fetch_technical_data(symbol):
     except Exception as e:
         return None
 
-# --- 2. HABERLERİ ÇEKME (YENİ - RSS YÖNTEMİ) ---
+# --- 2. HABERLERİ ÇEKME (RSS YÖNTEMİ) ---
 def fetch_news(symbol):
     # Symbol "BTCUSDT" ise sadece "BTC" kısmını alıyoruz
     coin_ticker = symbol.replace("USDT", "").upper()
@@ -42,7 +42,6 @@ def fetch_news(symbol):
         if feed.entries:
             for entry in feed.entries[:3]:
                 title = entry.title
-                # RSS'de duygu analizi (Bullish/Bearish) verisi olmaz, sadece başlığı alırız
                 news_list.append(f"• {title}")
         
         return news_list if news_list else ["Yakın zamanda önemli bir haber akışı yok."]
@@ -99,7 +98,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     df = fetch_technical_data(symbol)
     if df is None:
-        await update.message.reply_text("❌ Grafik verisi alınamadı.")
+        await update.message.reply_text("❌ Grafik verisi alınamadı. Sembolü kontrol et.")
         return
 
     data = analyze_market(df)
@@ -112,7 +111,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💵 *Fiyat:* {data['price']:.4f}\n\n"
         f"✅ *TP (Hedef):* {data['tp']:.4f}\n"
         f"⛔ *SL (Stop):* {data['sl']:.4f}\n\n"
-        f"📰 *SON DAKİKA HABERLERİ (RSS):*\n"
+        f"📰 *SON DAKİKA HABERLERİ:*\n"
     )
     for n in news: msg += f"{n}\n"
     
