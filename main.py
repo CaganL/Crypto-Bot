@@ -1,5 +1,5 @@
 import logging
-import requests
+import feedparser
 import ccxt
 import pandas as pd
 import pandas_ta as ta
@@ -8,9 +8,9 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import os
 
 # --- AYARLAR ---
-# Token'larını tırnak içine yaz
 TELEGRAM_TOKEN = "BURAYA_TELEGRAM_TOKEN_GELECEK"
-CRYPTOPANIC_API_KEY = "BURAYA_CRYPTOPANIC_API_KEY_GELECEK"
+# CRYPTOPANIC_API_KEY satırını sildik, artık gerek yok!
+
 SYMBOL_TIMEFRAME = '4h'
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -26,27 +26,28 @@ def fetch_technical_data(symbol):
     except Exception as e:
         return None
 
-# --- 2. HABERLERİ ÇEKME (CryptoPanic) ---
+# --- 2. HABERLERİ ÇEKME (YENİ - RSS YÖNTEMİ) ---
 def fetch_news(symbol):
-    coin_ticker = symbol.replace("USDT", "")
-    url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}&currencies={coin_ticker}&filter=important&public=true"
+    # Symbol "BTCUSDT" ise sadece "BTC" kısmını alıyoruz
+    coin_ticker = symbol.replace("USDT", "").upper()
+    
+    # CryptoPanic RSS Adresi (Ücretsiz ve Hızlı)
+    rss_url = f"https://cryptopanic.com/news/rss/currency/{coin_ticker}/"
     
     try:
-        response = requests.get(url).json()
+        feed = feedparser.parse(rss_url)
         news_list = []
-        if "results" in response:
-            for post in response["results"][:3]:
-                title = post["title"]
-                sentiment = ""
-                if "votes" in post:
-                    if post["votes"]["bullish"] > post["votes"]["bearish"]:
-                        sentiment = "🟢 (Pozitif)"
-                    elif post["votes"]["bearish"] > post["votes"]["bullish"]:
-                        sentiment = "🔴 (Negatif)"
-                news_list.append(f"• {title} {sentiment}")
+        
+        # İlk 3 haberi al
+        if feed.entries:
+            for entry in feed.entries[:3]:
+                title = entry.title
+                # RSS'de duygu analizi (Bullish/Bearish) verisi olmaz, sadece başlığı alırız
+                news_list.append(f"• {title}")
+        
         return news_list if news_list else ["Yakın zamanda önemli bir haber akışı yok."]
     except Exception as e:
-        return ["Haber verisi çekilemedi."]
+        return ["Haber kaynağına ulaşılamadı."]
 
 # --- 3. ANALİZ MOTORU ---
 def analyze_market(df):
@@ -94,11 +95,11 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} analiz ediliyor...")
+    await update.message.reply_text(f"🔍 {symbol} analiz ediliyor ve haberler taranıyor...")
 
     df = fetch_technical_data(symbol)
     if df is None:
-        await update.message.reply_text("❌ Veri alınamadı. Sembolü kontrol et.")
+        await update.message.reply_text("❌ Grafik verisi alınamadı.")
         return
 
     data = analyze_market(df)
@@ -111,7 +112,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💵 *Fiyat:* {data['price']:.4f}\n\n"
         f"✅ *TP (Hedef):* {data['tp']:.4f}\n"
         f"⛔ *SL (Stop):* {data['sl']:.4f}\n\n"
-        f"📰 *ÖNEMLİ HABERLER:*\n"
+        f"📰 *SON DAKİKA HABERLERİ (RSS):*\n"
     )
     for n in news: msg += f"{n}\n"
     
@@ -121,4 +122,3 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
-
