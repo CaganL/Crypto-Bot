@@ -24,7 +24,7 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- MATEMATİKSEL FONKSİYONLAR (Kütüphanesiz) ---
+# --- MATEMATİKSEL FONKSİYONLAR ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period, adjust=False).mean()
@@ -56,33 +56,21 @@ def fetch_news(symbol):
     except: return []
 
 def analyze_market(symbol):
-    # Veri Çek
     df_4h = fetch_data(symbol, '4h')
     df_15m = fetch_data(symbol, '15m')
     if df_4h is None or df_15m is None: return None
 
-    # 4 Saatlik Hesaplamalar (Manuel)
     current_price = df_4h['close'].iloc[-1]
-    
-    # EMA 50
     ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
-    
-    # RSI 14
     rsi_series = calculate_rsi(df_4h['close'], 14)
     rsi_4h = rsi_series.iloc[-1]
-    
-    # Hacim Ortalaması (SMA 20)
     vol_sma = calculate_sma(df_4h['volume'], 20).iloc[-1]
     current_vol = df_4h['volume'].iloc[-1]
-
-    # 15 Dakikalık RSI
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
 
-    # --- SKORLAMA SİSTEMİ ---
     score = 0
-    
-    # 1. Trend (Fiyat vs EMA50)
     diff_percent = ((current_price - ema_50) / ema_50) * 100
+    
     if diff_percent > 3: score += 30
     elif diff_percent > 1: score += 20
     elif diff_percent > 0: score += 10
@@ -90,18 +78,15 @@ def analyze_market(symbol):
     elif diff_percent < -1: score -= 20
     else: score -= 10
 
-    # 2. Hacim
     vol_ratio = current_vol / vol_sma if vol_sma > 0 else 1
     if vol_ratio > 2.0: score += (20 if score > 0 else -20)
     elif vol_ratio > 1.2: score += (10 if score > 0 else -10)
 
-    # 3. RSI (4H)
     if rsi_4h < 25: score += 30
     elif rsi_4h < 35: score += 20
     elif rsi_4h > 75: score -= 30
     elif rsi_4h > 65: score -= 20
 
-    # 4. RSI (15m - Kısa Vade Teyit)
     if score > 0:
         if rsi_15m < 30: score += 20
         elif rsi_15m < 50: score += 10
@@ -113,7 +98,6 @@ def analyze_market(symbol):
 
     direction = "YÜKSELİŞ (LONG) 🟢" if score > 0 else "DÜŞÜŞ (SHORT) 🔴"
     
-    # Hedef / Stop Belirleme
     recent_high = df_4h['high'].tail(50).max()
     recent_low = df_4h['low'].tail(50).min()
     
@@ -127,11 +111,10 @@ def analyze_market(symbol):
     return {
         "symbol": symbol, "price": current_price, "score": score, 
         "direction": direction, "tp": tp, "sl": sl,
-        "rsi_4h": rsi_4h, "rsi_15m": rsi_15m, 
-        "vol_ratio": vol_ratio, "diff_percent": diff_percent
+        "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU ---
+# --- AI YORUMU (HATA AYIKLAMA MODU) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Kripto analistisin. Özetle:\n"
@@ -142,9 +125,12 @@ async def get_ai_comment(data, news):
         f"Yorum (Türkçe): Kısa ve net işlem tavsiyesi ver."
     )
     try:
+        # Hata olursa yakalamak için try bloğu
         response = await asyncio.to_thread(model.generate_content, prompt)
         return response.text
-    except: return "AI servisi meşgul."
+    except Exception as e:
+        # BURASI ÖNEMLİ: Hatayı gizlemek yerine açıkça yazdırıyoruz
+        return f"⚠️ HATA DETAYI: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,7 +147,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V3.3 - NoLib)*\n"
+        f"💎 *{symbol} ANALİZ (V3.4 - Debug)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
