@@ -18,13 +18,14 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 # İzleme Listesi
 WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
 
-# Gemini (GÜNCELLENEN KISIM BURASI: PRO MODELİ)
+# Gemini (GÜNCELLENEN KISIM: Tam Sürüm Adı)
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro')
+# 'gemini-pro' yerine 'gemini-1.0-pro' kullanıyoruz. Bu daha kararlıdır.
+model = genai.GenerativeModel('gemini-1.0-pro')
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- MATEMATİKSEL FONKSİYONLAR ---
+# --- MATEMATİKSEL FONKSİYONLAR (Kütüphanesiz) ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period, adjust=False).mean()
@@ -61,6 +62,8 @@ def analyze_market(symbol):
     if df_4h is None or df_15m is None: return None
 
     current_price = df_4h['close'].iloc[-1]
+    
+    # İndikatör Hesaplamaları
     ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
     rsi_series = calculate_rsi(df_4h['close'], 14)
     rsi_4h = rsi_series.iloc[-1]
@@ -68,6 +71,7 @@ def analyze_market(symbol):
     current_vol = df_4h['volume'].iloc[-1]
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
 
+    # Puanlama Algoritması
     score = 0
     diff_percent = ((current_price - ema_50) / ema_50) * 100
     
@@ -114,7 +118,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU ---
+# --- AI YORUMU (Hata Ayıklama Modu Açık) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Kripto analistisin. Özetle:\n"
@@ -128,7 +132,8 @@ async def get_ai_comment(data, news):
         response = await asyncio.to_thread(model.generate_content, prompt)
         return response.text
     except Exception as e:
-        return f"⚠️ HATA DETAYI: {str(e)}"
+        # Hata olursa Telegram'a basıyoruz
+        return f"⚠️ AI HATASI: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,7 +150,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V3.5 - Pro)*\n"
+        f"💎 *{symbol} ANALİZ (V3.6 - Stable)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
