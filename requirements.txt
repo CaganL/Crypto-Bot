@@ -4,4 +4,3 @@ feedparser
 google-generativeai
 pandas
 numpy
-git+https://github.com/twopirllc/pandas-ta.git@development
