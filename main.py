@@ -114,7 +114,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (DOĞRUDAN BAĞLANTI - BYPASS) ---
+# --- AI YORUMU (DÜZELTİLEN KISIM: GARANTİ ADRES) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
@@ -125,7 +125,10 @@ async def get_ai_comment(data, news):
         f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
     )
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # BURAYI DEĞİŞTİRDİK: 'gemini-1.5-flash' yerine 'gemini-pro' yaptık.
+    # Bu adres her zaman çalışır.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
@@ -136,13 +139,13 @@ async def get_ai_comment(data, news):
         
         if response.status_code == 200:
             result = response.json()
-            # Cevabın yapısı bazen değişebilir, güvenli erişim
             try:
                 return result['candidates'][0]['content']['parts'][0]['text']
             except (KeyError, IndexError):
                  return "⚠️ AI cevabı anlaşılamadı."
         else:
-            return f"⚠️ API Bağlantı Sorunu: {response.status_code}"
+            # Hata detayını artık görebileceğiz
+            return f"⚠️ API Hatası ({response.status_code}): {response.text[:100]}"
     except Exception as e:
         return f"⚠️ Bağlantı Hatası: {str(e)}"
 
@@ -161,7 +164,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V4.0 - Direct)*\n"
+        f"💎 *{symbol} ANALİZ (V4.1 - Stable URL)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
