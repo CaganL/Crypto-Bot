@@ -2,11 +2,12 @@ import logging
 import feedparser
 import ccxt
 import pandas as pd
-import google.generativeai as genai
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
 import os
+import json
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -17,11 +18,6 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 
 # İzleme Listesi
 WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
-
-# Gemini Ayarları (GÜNCEL MODEL)
-genai.configure(api_key=GEMINI_API_KEY)
-# Kütüphaneyi güncellediğimiz için artık bu model %100 çalışacak
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -62,6 +58,8 @@ def analyze_market(symbol):
     if df_4h is None or df_15m is None: return None
 
     current_price = df_4h['close'].iloc[-1]
+    
+    # İndikatörler
     ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
     rsi_series = calculate_rsi(df_4h['close'], 14)
     rsi_4h = rsi_series.iloc[-1]
@@ -69,6 +67,7 @@ def analyze_market(symbol):
     current_vol = df_4h['volume'].iloc[-1]
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
 
+    # Puanlama
     score = 0
     diff_percent = ((current_price - ema_50) / ema_50) * 100
     
@@ -115,27 +114,43 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU ---
+# --- AI YORUMU (DOĞRUDAN BAĞLANTI - BYPASS) ---
 async def get_ai_comment(data, news):
     prompt = (
-        f"Kripto analistisin. Özetle:\n"
+        f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
         f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
-        f"Skor: {data['score']}/100 | Yön: {data['direction']}\n"
+        f"Teknik Skor: {data['score']}/100 | Yön: {data['direction']}\n"
         f"RSI(4h): {data['rsi_4h']:.1f} | RSI(15m): {data['rsi_15m']:.1f}\n"
-        f"Haberler: {', '.join(news)}\n"
-        f"Yorum (Türkçe): Kısa ve net işlem tavsiyesi ver."
+        f"Haber Başlıkları: {', '.join(news)}\n\n"
+        f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
     )
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+
     try:
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        return response.text
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            result = response.json()
+            # Cevabın yapısı bazen değişebilir, güvenli erişim
+            try:
+                return result['candidates'][0]['content']['parts'][0]['text']
+            except (KeyError, IndexError):
+                 return "⚠️ AI cevabı anlaşılamadı."
+        else:
+            return f"⚠️ API Bağlantı Sorunu: {response.status_code}"
     except Exception as e:
-        return f"⚠️ AI HATASI: {str(e)}"
+        return f"⚠️ Bağlantı Hatası: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} analiz ediliyor...")
+    await update.message.reply_text(f"🔍 {symbol} için Yapay Zeka devreye giriyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı.")
@@ -146,7 +161,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V3.7 - Final)*\n"
+        f"💎 *{symbol} ANALİZ (V4.0 - Direct)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
