@@ -7,10 +7,16 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
+import os # Şifreleri sistemden okumak için gerekli kütüphane
 
-# --- AYARLAR VE ANAHTARLAR ---
-TELEGRAM_TOKEN = "8320997161:AAFuNcpONcHLNdnitNehNZ2SOMskiGva6Qs"
-GEMINI_API_KEY = "AIzaSyDS7qv7xvp6l_jS8dWU510DHPKT7qYgbFU"
+# --- GÜVENLİK AYARLARI ---
+# Kodun içinde şifre YOK! Railway'den çekiyoruz.
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Kontrol: Eğer Railway'e eklenmemişse bot hata verip dursun.
+if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
+    raise ValueError("❌ HATA: API Anahtarları bulunamadı! Railway Variables kısmına eklediğinden emin ol.")
 
 # İzleme Listesi
 WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
@@ -43,15 +49,15 @@ def fetch_news(symbol):
 
 # --- 3. ANALİZ MOTORU (V3.2 - Tam Kademeli) ---
 def analyze_market(symbol):
-    # A. Veri Çekme
+    # Veri Çekme
     df_4h = fetch_data(symbol, '4h')
     df_15m = fetch_data(symbol, '15m')
     if df_4h is None or df_15m is None: return None
 
-    # B. İndikatör Hesaplamaları (4H)
+    # 4 Saatlik İndikatörler
     df_4h['ema_50'] = ta.ema(df_4h['close'], length=50)
     df_4h['rsi'] = ta.rsi(df_4h['close'], length=14)
-    df_4h['vol_ma'] = ta.sma(df_4h['volume'], length=20) # Hacim Ortalaması
+    df_4h['vol_ma'] = ta.sma(df_4h['volume'], length=20)
     
     current_price = df_4h['close'].iloc[-1]
     ema_4h = df_4h['ema_50'].iloc[-1]
@@ -59,58 +65,51 @@ def analyze_market(symbol):
     current_vol = df_4h['volume'].iloc[-1]
     avg_vol = df_4h['vol_ma'].iloc[-1]
 
-    # C. İndikatör Hesaplamaları (15M)
+    # 15 Dakikalık İndikatörler
     df_15m['rsi'] = ta.rsi(df_15m['close'], length=14)
     rsi_15m = df_15m['rsi'].iloc[-1]
 
-    # --- SKOR HESAPLAMA (Kademeli Sistem) ---
+    # --- SKORLAMA ---
     score = 0
     
-    # 1. TREND GÜCÜ (EMA Mesafesi) - Max 30 Puan
-    # Fiyatın EMA'dan ne kadar uzak olduğuna bakar.
+    # 1. Trend Gücü (EMA Farkı)
     diff_percent = ((current_price - ema_4h) / ema_4h) * 100
-    
-    if diff_percent > 3: score += 30      # %3'ten fazla yukarıda (Çok Güçlü Trend)
-    elif diff_percent > 1: score += 20    # %1'den fazla yukarıda (Güçlü Trend)
-    elif diff_percent > 0: score += 10    # EMA üzerinde ama zayıf
-    elif diff_percent < -3: score -= 30   # %3'ten fazla aşağıda (Çok Güçlü Düşüş)
-    elif diff_percent < -1: score -= 20   # %1'den fazla aşağıda (Güçlü Düşüş)
-    else: score -= 10                     # EMA altında ama zayıf
+    if diff_percent > 3: score += 30
+    elif diff_percent > 1: score += 20
+    elif diff_percent > 0: score += 10
+    elif diff_percent < -3: score -= 30
+    elif diff_percent < -1: score -= 20
+    else: score -= 10
 
-    # 2. HACİM GÜCÜ (Volume) - Max 20 Puan
-    # Mevcut hacim ortalamanın kaç katı?
+    # 2. Hacim Gücü
     vol_ratio = current_vol / avg_vol
-    
-    if vol_ratio > 2.0: # Hacim Patlaması (Ortalamanın 2 katı)
-        if score > 0: score += 20 # Yükselişi destekliyor
-        else: score -= 20 # Düşüşü destekliyor
-    elif vol_ratio > 1.2: # Hacim Yüksek
+    if vol_ratio > 2.0:
+        if score > 0: score += 20
+        else: score -= 20
+    elif vol_ratio > 1.2:
         if score > 0: score += 10
         else: score -= 10
-    # Hacim ortalamadan düşükse puan eklemiyoruz (Fake hareket riski)
 
-    # 3. RSI DURUMU (4H) - Max 30 Puan
-    if rsi_4h < 25: score += 30      # Çok Ucuz
-    elif rsi_4h < 35: score += 20    # Ucuz
-    elif rsi_4h < 45: score += 10    # Makul
-    elif rsi_4h > 75: score -= 30    # Çok Pahalı
-    elif rsi_4h > 65: score -= 20    # Pahalı
-    elif rsi_4h > 55: score -= 10    # Riskli
+    # 3. RSI (4H)
+    if rsi_4h < 25: score += 30
+    elif rsi_4h < 35: score += 20
+    elif rsi_4h < 45: score += 10
+    elif rsi_4h > 75: score -= 30
+    elif rsi_4h > 65: score -= 20
+    elif rsi_4h > 55: score -= 10
 
-    # 4. KISA VADE ONAYI (15M) - Max 20 Puan
-    if score > 0: # Long Bakıyorsak
+    # 4. Kısa Vade (15M)
+    if score > 0:
         if rsi_15m < 30: score += 20
         elif rsi_15m < 50: score += 10
-        elif rsi_15m > 70: score -= 15 # Kısa vadede şişmiş
-    else: # Short Bakıyorsak
+        elif rsi_15m > 70: score -= 15
+    else:
         if rsi_15m > 70: score -= 20
         elif rsi_15m > 50: score -= 10
-        elif rsi_15m < 30: score += 15 # Kısa vadede dipte
+        elif rsi_15m < 30: score += 15
 
-    # --- SONUÇLAR ---
     direction = "YÜKSELİŞ (LONG) 🟢" if score > 0 else "DÜŞÜŞ (SHORT) 🔴"
     
-    # TP / SL (Price Action)
     recent_high = df_4h['high'].tail(50).max()
     recent_low = df_4h['low'].tail(50).min()
     
@@ -128,14 +127,14 @@ def analyze_market(symbol):
         "vol_ratio": vol_ratio, "diff_percent": diff_percent
     }
 
-# --- 4. GEMINI YORUMCUSU ---
+# --- AI YORUMU ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Kripto analistisin. Verileri yorumla:\n"
         f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
         f"Skor: {data['score']}/100\n"
         f"Trend (EMA Farkı): %{data['diff_percent']:.2f}\n"
-        f"Hacim Gücü: {data['vol_ratio']:.1f}x (Ortalamaya göre)\n"
+        f"Hacim Gücü: {data['vol_ratio']:.1f}x\n"
         f"RSI (4H): {data['rsi_4h']:.1f} | RSI (15m): {data['rsi_15m']:.1f}\n"
         f"Haberler: {', '.join(news)}\n"
         f"Yorum (Türkçe): Teknik Durum, Hacim Analizi ve Haber Etkisi başlıklarıyla özetle."
@@ -145,11 +144,11 @@ async def get_ai_comment(data, news):
         return response.text
     except: return "AI yorumu alınamadı."
 
-# --- 5. KOMUTLAR ---
+# --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} için Trend, Hacim ve İndikatörler taranıyor...")
+    await update.message.reply_text(f"🔍 {symbol} için Trend, Hacim ve AI analizi yapılıyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri yok.")
