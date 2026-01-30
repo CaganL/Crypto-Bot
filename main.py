@@ -124,7 +124,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V7.8 - HEAVY DUTY HIERARCHY) ---
+# --- AI YORUMU (V8.0 - FUTURE SHOCK ARCHITECTURE) ---
 async def get_ai_comment(data, news):
     if news:
         news_text = "\n".join([f"- {n}" for n in news])
@@ -144,54 +144,53 @@ async def get_ai_comment(data, news):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     # -----------------------------------------------------------
-    # 1. KATMAN: GEMINI 2.5 PRO (En Yeni Dahi)
+    # 1. KATMAN: GEMINI 3 PRO (GELECEĞİN TEKNOLOJİSİ) 👑
+    # -----------------------------------------------------------
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=25)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(👑 Analiz: Gemini 3.0 Pro Preview)_"
+    except: pass 
+
+    # -----------------------------------------------------------
+    # 2. KATMAN: GEMINI 2.5 PRO (GÜVENİLİR LİMAN) 🧠
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
             return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
-    except: pass 
-
-    # -----------------------------------------------------------
-    # 2. KATMAN: GEMINI 2.0 PRO EXPERIMENTAL (Tecrübeli Pro)
-    # -----------------------------------------------------------
-    try:
-        # "exp" sürümü genelde developerlara açıktır, bunu ekledik.
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🎓 Analiz: Gemini 2.0 Pro Exp)_"
     except: pass
 
     # -----------------------------------------------------------
-    # 3. KATMAN: GEMINI 2.5 FLASH (Yeni Hızlı)
+    # 3. KATMAN: GEMINI 3 FLASH (YENİ NESİL HIZ) ⚡
+    # -----------------------------------------------------------
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=15)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 3.0 Flash Preview)_"
+    except: pass
+
+    # -----------------------------------------------------------
+    # 4. KATMAN: GEMINI 2.5 FLASH (SAĞLAM HIZLI) 🏎️
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 2.5 Flash)_"
-    except: pass
-
-    # -----------------------------------------------------------
-    # 4. KATMAN: GEMINI 2.5 FLASH LITE (Yeni Hibrid)
-    # -----------------------------------------------------------
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
         if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🚀 Analiz: Gemini 2.5 Flash Lite)_"
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🏎️ Analiz: Gemini 2.5 Flash)_"
     except: pass
 
     # -----------------------------------------------------------
-    # 5. KATMAN: GEMINI 2.0 FLASH (Son Kale - En Güvenilir)
+    # 5. KATMAN: GEMINI 2.0 FLASH LITE (SON KALE - BATMAZ) 🛡️
     # -----------------------------------------------------------
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=8)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=5)
         if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🛡️ Analiz: Gemini 2.0 Flash)_"
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🛡️ Analiz: Gemini 2.0 Flash Lite)_"
         else:
             return f"⚠️ PENTAGON ÇÖKTÜ: 5 model de cevap vermedi. Hata Kodu: {response.status_code}"
     except Exception as e:
@@ -202,7 +201,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    await update.message.reply_text(f"🔍 {symbol} için 5 katmanlı (Pro Öncelikli) analiz başlatılıyor...")
+    await update.message.reply_text(f"🔍 {symbol} için GEMINI 3.0 destekli motor çalışıyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı. (Spam Koruması: Biraz bekle)")
@@ -213,7 +212,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V7.8 - Heavy Duty)*\n"
+        f"💎 *{symbol} ANALİZ (V8.0 - Future Shock)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
