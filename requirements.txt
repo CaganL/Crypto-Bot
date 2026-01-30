@@ -2,6 +2,6 @@ python-telegram-bot
 ccxt
 feedparser
 google-generativeai
-numpy==1.23.5
-pandas==1.5.3
-pandas-ta
+pandas
+numpy
+git+https://github.com/twopirllc/pandas-ta.git@development
