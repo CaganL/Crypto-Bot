@@ -124,7 +124,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V8.0 - FUTURE SHOCK ARCHITECTURE) ---
+# --- AI YORUMU (V8.1 - PURE NEXT-GEN) ---
 async def get_ai_comment(data, news):
     if news:
         news_text = "\n".join([f"- {n}" for n in news])
@@ -144,7 +144,7 @@ async def get_ai_comment(data, news):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     # -----------------------------------------------------------
-    # 1. KATMAN: GEMINI 3 PRO (GELECEĞİN TEKNOLOJİSİ) 👑
+    # 1. KATMAN: GEMINI 3 PRO PREVIEW (GELECEK) 👑
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key={GEMINI_API_KEY}"
@@ -154,7 +154,7 @@ async def get_ai_comment(data, news):
     except: pass 
 
     # -----------------------------------------------------------
-    # 2. KATMAN: GEMINI 2.5 PRO (GÜVENİLİR LİMAN) 🧠
+    # 2. KATMAN: GEMINI 2.5 PRO (GÜVENİLİR DAHİ) 🧠
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
@@ -164,7 +164,7 @@ async def get_ai_comment(data, news):
     except: pass
 
     # -----------------------------------------------------------
-    # 3. KATMAN: GEMINI 3 FLASH (YENİ NESİL HIZ) ⚡
+    # 3. KATMAN: GEMINI 3 FLASH PREVIEW (HIZLI GELECEK) ⚡
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={GEMINI_API_KEY}"
@@ -174,7 +174,7 @@ async def get_ai_comment(data, news):
     except: pass
 
     # -----------------------------------------------------------
-    # 4. KATMAN: GEMINI 2.5 FLASH (SAĞLAM HIZLI) 🏎️
+    # 4. KATMAN: GEMINI 2.5 FLASH (GÜNCEL STANDART) 🏎️
     # -----------------------------------------------------------
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -184,15 +184,16 @@ async def get_ai_comment(data, news):
     except: pass
 
     # -----------------------------------------------------------
-    # 5. KATMAN: GEMINI 2.0 FLASH LITE (SON KALE - BATMAZ) 🛡️
+    # 5. KATMAN: GEMINI 2.5 FLASH LITE (YENİ NESİL EKONOMİ) 🚀
     # -----------------------------------------------------------
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
+        # Eski 2.0 yerine senin istediğin 2.5 Lite'ı koyduk!
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=5)
         if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🛡️ Analiz: Gemini 2.0 Flash Lite)_"
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🚀 Analiz: Gemini 2.5 Flash Lite)_"
         else:
-            return f"⚠️ PENTAGON ÇÖKTÜ: 5 model de cevap vermedi. Hata Kodu: {response.status_code}"
+            return f"⚠️ SİSTEM HATASI: 5 model de yanıt vermedi. (Son Hata: {response.status_code})"
     except Exception as e:
         return f"⚠️ BAĞLANTI HATASI: {str(e)}"
 
@@ -201,7 +202,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    await update.message.reply_text(f"🔍 {symbol} için GEMINI 3.0 destekli motor çalışıyor...")
+    await update.message.reply_text(f"🔍 {symbol} için GEMINI 3.0 ve 2.5 motorları çalışıyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı. (Spam Koruması: Biraz bekle)")
@@ -212,7 +213,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V8.0 - Future Shock)*\n"
+        f"💎 *{symbol} ANALİZ (V8.1 - Pure Next-Gen)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
