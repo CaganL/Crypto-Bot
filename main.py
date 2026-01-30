@@ -18,9 +18,9 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 # İzleme Listesi
 WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
 
-# Gemini
+# Gemini (GÜNCELLENEN KISIM BURASI: PRO MODELİ)
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -114,7 +114,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (HATA AYIKLAMA MODU) ---
+# --- AI YORUMU ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Kripto analistisin. Özetle:\n"
@@ -125,11 +125,9 @@ async def get_ai_comment(data, news):
         f"Yorum (Türkçe): Kısa ve net işlem tavsiyesi ver."
     )
     try:
-        # Hata olursa yakalamak için try bloğu
         response = await asyncio.to_thread(model.generate_content, prompt)
         return response.text
     except Exception as e:
-        # BURASI ÖNEMLİ: Hatayı gizlemek yerine açıkça yazdırıyoruz
         return f"⚠️ HATA DETAYI: {str(e)}"
 
 # --- KOMUTLAR ---
@@ -147,7 +145,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V3.4 - Debug)*\n"
+        f"💎 *{symbol} ANALİZ (V3.5 - Pro)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
