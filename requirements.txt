@@ -1,9 +1,7 @@
 python-telegram-bot
 ccxt
-pandas
-pandas-ta
 feedparser
 google-generativeai
-numpy<2.0.0
-
-
+numpy==1.23.5
+pandas==1.5.3
+pandas-ta
