@@ -16,10 +16,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("❌ HATA: API Anahtarları Railway Variables kısmında eksik!")
 
-# İzleme Listesi
-WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# Exchange Ayarı
+exchange = ccxt.binance({
+    'enableRateLimit': True,
+    'options': {'defaultType': 'future'}
+})
 
 # --- MATEMATİKSEL FONKSİYONLAR ---
 def calculate_rsi(series, period=14):
@@ -35,185 +38,139 @@ def calculate_ema(series, period):
 def calculate_sma(series, period):
     return series.rolling(window=period).mean()
 
-# --- VERİ VE ANALİZ ---
-def fetch_data(symbol, timeframe):
-    exchange = ccxt.binance()
-    exchange.enableRateLimit = True 
+# --- VERİ ÇEKME (ÇİFT MOTOR) ---
+def fetch_data(symbol, timeframe='4h'):
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         return df
-    except: return None
+    except Exception as e:
+        print(f"⚠️ CCXT Hatası: {e}, HTTP deneniyor...")
+    
+    try:
+        base_url = "https://api.binance.com/api/v3/klines"
+        params = {'symbol': symbol, 'interval': timeframe, 'limit': 100}
+        response = requests.get(base_url, params=params, timeout=10)
+        data = response.json()
+        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'q_vol', 'trades', 'tb_base', 'tb_quote', 'ignore'])
+        df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
+        return df
+    except Exception as e:
+        print(f"❌ HTTP Hatası: {e}")
+        return None
 
 def fetch_news(symbol):
     coin_ticker = symbol.replace("USDT", "").upper()
     rss_url = f"https://cryptopanic.com/news/rss/currency/{coin_ticker}/"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
         response = requests.get(rss_url, headers=headers, timeout=5)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            if feed.entries:
-                return [entry.title for entry in feed.entries[:5]]
-            else:
-                return []
-        else:
-            return []
-    except:
+            return [entry.title for entry in feed.entries[:5]] if feed.entries else []
         return []
+    except: return []
 
 def analyze_market(symbol):
     df_4h = fetch_data(symbol, '4h')
+    if df_4h is None: return None
+    
     df_15m = fetch_data(symbol, '15m')
-    if df_4h is None or df_15m is None: return None
+    if df_15m is None: return None
 
     current_price = df_4h['close'].iloc[-1]
-    
     ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
-    rsi_series = calculate_rsi(df_4h['close'], 14)
-    rsi_4h = rsi_series.iloc[-1]
-    vol_sma = calculate_sma(df_4h['volume'], 20).iloc[-1]
-    current_vol = df_4h['volume'].iloc[-1]
+    rsi_4h = calculate_rsi(df_4h['close'], 14).iloc[-1]
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
-
+    
+    # Basit Skorlama
     score = 0
     diff_percent = ((current_price - ema_50) / ema_50) * 100
-    
-    if diff_percent > 3: score += 30
-    elif diff_percent > 1: score += 20
-    elif diff_percent > 0: score += 10
-    elif diff_percent < -3: score -= 30
-    elif diff_percent < -1: score -= 20
+    if diff_percent > 0: score += 10
     else: score -= 10
-
-    vol_ratio = current_vol / vol_sma if vol_sma > 0 else 1
-    if vol_ratio > 2.0: score += (20 if score > 0 else -20)
-    elif vol_ratio > 1.2: score += (10 if score > 0 else -10)
-
-    if rsi_4h < 25: score += 30
-    elif rsi_4h < 35: score += 20
-    elif rsi_4h > 75: score -= 30
-    elif rsi_4h > 65: score -= 20
-
-    if score > 0:
-        if rsi_15m < 30: score += 20
-        elif rsi_15m < 50: score += 10
-        elif rsi_15m > 70: score -= 15
-    else:
-        if rsi_15m > 70: score -= 20
-        elif rsi_15m > 50: score -= 10
-        elif rsi_15m < 30: score += 15
-
+    
+    if rsi_4h < 30: score += 30
+    elif rsi_4h > 70: score -= 30
+    
     direction = "YÜKSELİŞ (LONG) 🟢" if score > 0 else "DÜŞÜŞ (SHORT) 🔴"
     
-    recent_high = df_4h['high'].tail(50).max()
-    recent_low = df_4h['low'].tail(50).min()
-    
-    if score > 0:
-        tp = recent_high
-        sl = recent_low * 0.99
-    else:
-        tp = recent_low
-        sl = recent_high * 1.01
-
     return {
         "symbol": symbol, "price": current_price, "score": score, 
-        "direction": direction, "tp": tp, "sl": sl,
+        "direction": direction, "tp": df_4h['high'].max(), "sl": df_4h['low'].min(),
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V8.1 - PURE NEXT-GEN) ---
-async def get_ai_comment(data, news):
-    if news:
-        news_text = "\n".join([f"- {n}" for n in news])
-    else:
-        news_text = "Önemli bir haber akışı yok."
+# --- AI YORUMU (CANLI STATUS GÜNCELLEMELİ) ---
+async def get_ai_comment(data, news, status_msg):
+    if news: news_text = "\n".join([f"- {n}" for n in news])
+    else: news_text = "Haber yok."
 
     prompt = (
         f"Sen usta bir kripto analistisin. Türkçe analiz yap.\n"
         f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
         f"Teknik Skor: {data['score']}/100 | Yön: {data['direction']}\n"
         f"RSI(4h): {data['rsi_4h']:.1f} | RSI(15m): {data['rsi_15m']:.1f}\n"
-        f"HABERLER:\n{news_text}\n\n"
-        f"GÖREV: Bu verileri yorumla, haberleri kullan, strateji ver."
+        f"HABERLER:\n{news_text}\n"
+        f"GÖREV: Yorumla ve strateji ver."
     )
     
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
-    # -----------------------------------------------------------
-    # 1. KATMAN: GEMINI 3 PRO PREVIEW (GELECEK) 👑
-    # -----------------------------------------------------------
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=25)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(👑 Analiz: Gemini 3.0 Pro Preview)_"
-    except: pass 
 
-    # -----------------------------------------------------------
-    # 2. KATMAN: GEMINI 2.5 PRO (GÜVENİLİR DAHİ) 🧠
-    # -----------------------------------------------------------
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
-    except: pass
+    # Model Listesi (Sırayla denenecek)
+    models = [
+        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview"),
+        ("Gemini 2.5 Pro", "gemini-2.5-pro"),
+        ("Gemini 3.0 Flash Preview", "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
+        ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite")
+    ]
 
-    # -----------------------------------------------------------
-    # 3. KATMAN: GEMINI 3 FLASH PREVIEW (HIZLI GELECEK) ⚡
-    # -----------------------------------------------------------
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 3.0 Flash Preview)_"
-    except: pass
+    for model_name, model_id in models:
+        try:
+            # Kullanıcıya bilgi ver
+            await status_msg.edit_text(f"🧠 Düşünüyor: {model_name}...")
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
+            response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=25)
+            
+            if response.status_code == 200:
+                return response.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n_(👑 Analiz: {model_name})_"
+            else:
+                print(f"{model_name} Hatası: {response.status_code}")
+                # Hata alınca hemen diğer modele geç
+                continue 
+        except Exception as e:
+            print(f"{model_name} Bağlantı Hatası: {e}")
+            continue
 
-    # -----------------------------------------------------------
-    # 4. KATMAN: GEMINI 2.5 FLASH (GÜNCEL STANDART) 🏎️
-    # -----------------------------------------------------------
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🏎️ Analiz: Gemini 2.5 Flash)_"
-    except: pass
-
-    # -----------------------------------------------------------
-    # 5. KATMAN: GEMINI 2.5 FLASH LITE (YENİ NESİL EKONOMİ) 🚀
-    # -----------------------------------------------------------
-    try:
-        # Eski 2.0 yerine senin istediğin 2.5 Lite'ı koyduk!
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=5)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🚀 Analiz: Gemini 2.5 Flash Lite)_"
-        else:
-            return f"⚠️ SİSTEM HATASI: 5 model de yanıt vermedi. (Son Hata: {response.status_code})"
-    except Exception as e:
-        return f"⚠️ BAĞLANTI HATASI: {str(e)}"
+    return "⚠️ HATA: Hiçbir yapay zeka modeli cevap veremedi. (Yoğunluk veya Kota Sorunu)"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    await update.message.reply_text(f"🔍 {symbol} için GEMINI 3.0 ve 2.5 motorları çalışıyor...")
+    # 1. İlk Mesajı At
+    status_msg = await update.message.reply_text(f"🔍 {symbol} için veriler toplanıyor...")
 
+    # 2. Verileri Çek
     data = analyze_market(symbol)
-    if not data: return await update.message.reply_text("❌ Veri alınamadı. (Spam Koruması: Biraz bekle)")
-
+    if not data:
+        return await status_msg.edit_text("❌ Veri alınamadı (Binance Bağlantı Hatası).")
+    
+    await status_msg.edit_text(f"✅ Veri alındı. Haberlere bakılıyor...")
+    
+    # 3. Haberleri Çek
     news = fetch_news(symbol)
-    ai_comment = await get_ai_comment(data, news)
+    
+    # 4. AI Analizi (Sürekli Güncelleme Yapacak)
+    ai_comment = await get_ai_comment(data, news, status_msg)
     
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V8.1 - Pure Next-Gen)*\n"
+        f"💎 *{symbol} ANALİZ (V8.4 - Live Status)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
@@ -221,7 +178,8 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
     )
     
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    # Sonucu düzenleyerek yaz (Yeni mesaj atmaz, eskisini değiştirir)
+    await status_msg.edit_text(msg, parse_mode='Markdown')
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
