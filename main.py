@@ -38,6 +38,7 @@ def calculate_sma(series, period):
 # --- VERİ VE ANALİZ ---
 def fetch_data(symbol, timeframe):
     exchange = ccxt.binance()
+    exchange.enableRateLimit = True 
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -123,60 +124,88 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V7.3 - DEBUG & LITE) ---
+# --- AI YORUMU (V7.8 - HEAVY DUTY HIERARCHY) ---
 async def get_ai_comment(data, news):
     if news:
         news_text = "\n".join([f"- {n}" for n in news])
     else:
-        news_text = "Önemli bir haber akışı tespit edilemedi."
+        news_text = "Önemli bir haber akışı yok."
 
     prompt = (
         f"Sen usta bir kripto analistisin. Türkçe analiz yap.\n"
         f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
         f"Teknik Skor: {data['score']}/100 | Yön: {data['direction']}\n"
         f"RSI(4h): {data['rsi_4h']:.1f} | RSI(15m): {data['rsi_15m']:.1f}\n"
-        f"SON HABERLER:\n{news_text}\n\n"
-        f"GÖREV: Bu verileri yorumla, haberleri dikkate al, net tavsiye ver."
+        f"HABERLER:\n{news_text}\n\n"
+        f"GÖREV: Bu verileri yorumla, haberleri kullan, strateji ver."
     )
     
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    # 1. HAMLE: PRO MODEL (25sn bekle)
+    # -----------------------------------------------------------
+    # 1. KATMAN: GEMINI 2.5 PRO (En Yeni Dahi)
+    # -----------------------------------------------------------
     try:
-        url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url_pro, headers=headers, json=payload, timeout=25)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
-            result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
     except: pass 
 
-    # 2. HAMLE: LITE MODEL (Yedek - 15sn)
-    # Flash yerine Flash-LITE kullanıyoruz, kotası daha geniştir.
+    # -----------------------------------------------------------
+    # 2. KATMAN: GEMINI 2.0 PRO EXPERIMENTAL (Tecrübeli Pro)
+    # -----------------------------------------------------------
     try:
-        url_lite = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url_lite, headers=headers, json=payload, timeout=15)
-        
+        # "exp" sürümü genelde developerlara açıktır, bunu ekledik.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
-            result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🪶 Analiz: Gemini 2.0 Flash Lite)_"
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🎓 Analiz: Gemini 2.0 Pro Exp)_"
+    except: pass
+
+    # -----------------------------------------------------------
+    # 3. KATMAN: GEMINI 2.5 FLASH (Yeni Hızlı)
+    # -----------------------------------------------------------
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=15)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 2.5 Flash)_"
+    except: pass
+
+    # -----------------------------------------------------------
+    # 4. KATMAN: GEMINI 2.5 FLASH LITE (Yeni Hibrid)
+    # -----------------------------------------------------------
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🚀 Analiz: Gemini 2.5 Flash Lite)_"
+    except: pass
+
+    # -----------------------------------------------------------
+    # 5. KATMAN: GEMINI 2.0 FLASH (Son Kale - En Güvenilir)
+    # -----------------------------------------------------------
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=8)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🛡️ Analiz: Gemini 2.0 Flash)_"
         else:
-            # Hata varsa gizleme, direkt göster ki görelim!
-            error_msg = response.text[:100] # Hatanın ilk 100 harfini göster
-            return f"⚠️ HATA OLUŞTU (Kod: {response.status_code}): {error_msg}"
-            
+            return f"⚠️ PENTAGON ÇÖKTÜ: 5 model de cevap vermedi. Hata Kodu: {response.status_code}"
     except Exception as e:
-        return f"⚠️ Bağlantı Hatası: {str(e)}"
+        return f"⚠️ BAĞLANTI HATASI: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    await update.message.reply_text(f"🔍 {symbol} için piyasa ve haberler taranıyor...")
+    await update.message.reply_text(f"🔍 {symbol} için 5 katmanlı (Pro Öncelikli) analiz başlatılıyor...")
 
     data = analyze_market(symbol)
-    if not data: return await update.message.reply_text("❌ Veri alınamadı.")
+    if not data: return await update.message.reply_text("❌ Veri alınamadı. (Spam Koruması: Biraz bekle)")
 
     news = fetch_news(symbol)
     ai_comment = await get_ai_comment(data, news)
@@ -184,7 +213,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V7.3 - Lite)*\n"
+        f"💎 *{symbol} ANALİZ (V7.8 - Heavy Duty)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
