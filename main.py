@@ -112,7 +112,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V6.1 - GEMINI 2.5 PRO) ---
+# --- AI YORUMU (V6.2 - AKILLI HİBRİT SİSTEM) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
@@ -123,29 +123,40 @@ async def get_ai_comment(data, news):
         f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
     )
     
-    # GÜNCELLEME: Flash yerine PRO modelini seçtik.
-    target_model = "gemini-2.5-pro" 
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={GEMINI_API_KEY}"
+    # PLAN A: Ferrari (Pro Model)
+    model_pro = "gemini-2.5-pro"
+    # PLAN B: Spor Araba (Flash Model - Yedek)
+    model_flash = "gemini-2.5-flash"
     
     headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
+    # --- 1. Deneme: PRO MODEL ---
     try:
-        # Pro modeli biraz daha yavaş olabilir, timeout süresini uzatmak gerekebilir ama
-        # şimdilik standart request yeterli.
-        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
+        url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/{model_pro}:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url_pro, headers=headers, json=payload)
         
         if response.status_code == 200:
             result = response.json()
-            try:
-                return result['candidates'][0]['content']['parts'][0]['text']
-            except (KeyError, IndexError):
-                 return "⚠️ AI cevabı anlaşılamadı."
+            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
         else:
-            return f"⚠️ API Hatası ({response.status_code}): {response.text[:100]}"
+            # 429 veya başka bir hata aldıysak HİÇ DURMA, Flash'a geç!
+            pass 
+            
+    except Exception:
+        pass # Hata olursa yedek plana geç
+
+    # --- 2. Deneme: FLASH MODEL (Yedek Güç) ---
+    try:
+        url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/{model_flash}:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url_flash, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 2.5 Flash - Hızlı Mod)_"
+        else:
+            return f"⚠️ Tüm motorlar arızalandı. Hata Kodu: {response.status_code}"
+            
     except Exception as e:
         return f"⚠️ Bağlantı Hatası: {str(e)}"
 
@@ -154,8 +165,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    # Kullanıcıya Pro modelin çalıştığını haber verelim
-    await update.message.reply_text(f"🔍 {symbol} (Gemini 2.5 Pro) ile analiz ediliyor... (Biraz sürebilir)")
+    await update.message.reply_text(f"🔍 {symbol} hibrit motorla analiz ediliyor...")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı.")
@@ -166,7 +176,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V6.1 - Pro Max)*\n"
+        f"💎 *{symbol} ANALİZ (V6.2 - Hybrid)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
