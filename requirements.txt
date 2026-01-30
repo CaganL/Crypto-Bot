@@ -1,14 +1,5 @@
+python-telegram-bot
+ccxt
 pandas
-ta
+pandas_ta
 requests
-python-telegram-bot==13.15
-googletrans==4.0.0-rc1
-feedparser
-schedule
-praw
-tweepy
-python-dotenv
-psycopg2-binary
-pandas
-joblib
-scikit-learn
