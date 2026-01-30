@@ -5,3 +5,5 @@ pandas-ta
 feedparser
 google-generativeai
 numpy<2.0.0
+
+
