@@ -39,45 +39,28 @@ def calculate_sma(series, period):
 def fetch_data(symbol, timeframe):
     exchange = ccxt.binance()
     try:
-        # Timeout eklendi: Veri çekemezse 10 saniyede pes etsin
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         return df
     except: return None
 
-# --- YENİLENMİŞ HABER FONKSİYONU (V7.2) ---
 def fetch_news(symbol):
-    # Coin ismini temizle (ETHUSDT -> ETH)
     coin_ticker = symbol.replace("USDT", "").upper()
-    
-    # 1. Kaynak: CryptoPanic RSS
     rss_url = f"https://cryptopanic.com/news/rss/currency/{coin_ticker}/"
-    
-    # ÖNEMLİ: Site bot olduğumuzu anlamasın diye "Chrome Tarayıcısı" gibi davranıyoruz.
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
-
     try:
-        # Önce requests ile veriyi çekiyoruz (Kılık değiştirerek)
         response = requests.get(rss_url, headers=headers, timeout=5)
-        
         if response.status_code == 200:
-            # Gelen veriyi feedparser'a veriyoruz
             feed = feedparser.parse(response.content)
-            
-            # Haber varsa başlıkları al, yoksa boş liste dön
             if feed.entries:
-                # Son 5 haberi alalım ki AI daha iyi anlasın
-                news_list = [entry.title for entry in feed.entries[:5]]
-                return news_list
+                return [entry.title for entry in feed.entries[:5]]
             else:
                 return []
         else:
             return []
-            
-    except Exception as e:
-        print(f"Haber Hatası: {e}")
+    except:
         return []
 
 def analyze_market(symbol):
@@ -140,77 +123,68 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V7.2 - NEWS FIX & HYBRID) ---
+# --- AI YORUMU (V7.3 - DEBUG & LITE) ---
 async def get_ai_comment(data, news):
-    # Haberleri güzelce formatlayalım
     if news:
         news_text = "\n".join([f"- {n}" for n in news])
     else:
         news_text = "Önemli bir haber akışı tespit edilemedi."
 
     prompt = (
-        f"Sen usta bir kripto analistisin. Aşağıdaki verileri kullanarak Türkçe, samimi ve yatırımcı dostu bir analiz yaz.\n\n"
-        f"📊 MARKET VERİLERİ:\n"
+        f"Sen usta bir kripto analistisin. Türkçe analiz yap.\n"
         f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
-        f"Teknik Skor: {data['score']}/100 ({data['direction']})\n"
-        f"RSI(4h): {data['rsi_4h']:.1f} (Ana Trend)\n"
-        f"RSI(15m): {data['rsi_15m']:.1f} (Kısa Vade)\n\n"
-        f"📰 SON HABERLER (CryptoPanic):\n{news_text}\n\n"
-        f"GÖREVLER:\n"
-        f"1. Teknik durumu yorumla.\n"
-        f"2. Eğer yukarıdaki haberler fiyatı etkileyecek türdense (Hack, ETF, Fed vb.) mutlaka analizine dahil et.\n"
-        f"3. Yatırımcıya 'Al', 'Sat' veya 'Bekle' gibi net bir strateji önerisi ver.\n"
-        f"4. Riskleri hatırlat."
+        f"Teknik Skor: {data['score']}/100 | Yön: {data['direction']}\n"
+        f"RSI(4h): {data['rsi_4h']:.1f} | RSI(15m): {data['rsi_15m']:.1f}\n"
+        f"SON HABERLER:\n{news_text}\n\n"
+        f"GÖREV: Bu verileri yorumla, haberleri dikkate al, net tavsiye ver."
     )
     
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    # 1. HAMLE: EN İYİSİNİ DENE (Gemini 2.5 PRO)
+    # 1. HAMLE: PRO MODEL (25sn bekle)
     try:
         url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
         response = await asyncio.to_thread(requests.post, url_pro, headers=headers, json=payload, timeout=25)
-        
         if response.status_code == 200:
             result = response.json()
             return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🧠 Analiz: Gemini 2.5 Pro)_"
-    except Exception:
-        pass 
+    except: pass 
 
-    # 2. HAMLE: HIZLIYA GEÇ (Gemini 2.0 FLASH)
+    # 2. HAMLE: LITE MODEL (Yedek - 15sn)
+    # Flash yerine Flash-LITE kullanıyoruz, kotası daha geniştir.
     try:
-        url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        response = await asyncio.to_thread(requests.post, url_flash, headers=headers, json=payload, timeout=10)
+        url_lite = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
+        response = await asyncio.to_thread(requests.post, url_lite, headers=headers, json=payload, timeout=15)
         
         if response.status_code == 200:
             result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(⚡ Analiz: Gemini 2.0 Flash - Yedek Güç)_"
+            return result['candidates'][0]['content']['parts'][0]['text'] + "\n\n_(🪶 Analiz: Gemini 2.0 Flash Lite)_"
+        else:
+            # Hata varsa gizleme, direkt göster ki görelim!
+            error_msg = response.text[:100] # Hatanın ilk 100 harfini göster
+            return f"⚠️ HATA OLUŞTU (Kod: {response.status_code}): {error_msg}"
+            
     except Exception as e:
-        return f"⚠️ Sistem Hatası: {str(e)}"
-
-    return "⚠️ AI yanıt veremedi."
+        return f"⚠️ Bağlantı Hatası: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    await update.message.reply_text(f"🔍 {symbol} piyasası ve haberleri taranıyor...")
+    await update.message.reply_text(f"🔍 {symbol} için piyasa ve haberler taranıyor...")
 
-    # Teknik Analiz
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı.")
 
-    # Haberler (Artık Chrome gibi davranıp çekecek)
     news = fetch_news(symbol)
-    
-    # AI Yorumu
     ai_comment = await get_ai_comment(data, news)
     
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V7.2 - News Fixed)*\n"
+        f"💎 *{symbol} ANALİZ (V7.3 - Lite)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
