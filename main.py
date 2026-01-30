@@ -112,7 +112,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V6.0 - GEMINI 2.5 FLASH) ---
+# --- AI YORUMU (V6.1 - GEMINI 2.5 PRO) ---
 async def get_ai_comment(data, news):
     prompt = (
         f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
@@ -123,8 +123,8 @@ async def get_ai_comment(data, news):
         f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
     )
     
-    # SENİN LİSTENDEN SEÇTİĞİMİZ EN GÜÇLÜ VE HIZLI MODEL:
-    target_model = "gemini-2.5-flash" 
+    # GÜNCELLEME: Flash yerine PRO modelini seçtik.
+    target_model = "gemini-2.5-pro" 
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={GEMINI_API_KEY}"
     
@@ -134,6 +134,8 @@ async def get_ai_comment(data, news):
     }
 
     try:
+        # Pro modeli biraz daha yavaş olabilir, timeout süresini uzatmak gerekebilir ama
+        # şimdilik standart request yeterli.
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
         
         if response.status_code == 200:
@@ -151,7 +153,9 @@ async def get_ai_comment(data, news):
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} (Gemini 2.5) ile analiz ediliyor...")
+    
+    # Kullanıcıya Pro modelin çalıştığını haber verelim
+    await update.message.reply_text(f"🔍 {symbol} (Gemini 2.5 Pro) ile analiz ediliyor... (Biraz sürebilir)")
 
     data = analyze_market(symbol)
     if not data: return await update.message.reply_text("❌ Veri alınamadı.")
@@ -162,7 +166,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (Next Gen)*\n"
+        f"💎 *{symbol} ANALİZ (V6.1 - Pro Max)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
