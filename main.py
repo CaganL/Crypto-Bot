@@ -16,174 +16,44 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("❌ HATA: API Anahtarları Railway Variables kısmında eksik!")
 
-# İzleme Listesi
-WATCHLIST = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "AVAXUSDT", "DOGEUSDT", "PEPEUSDT"]
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- MATEMATİKSEL FONKSİYONLAR ---
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/period, adjust=False).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
-def calculate_sma(series, period):
-    return series.rolling(window=period).mean()
-
-# --- VERİ VE ANALİZ ---
-def fetch_data(symbol, timeframe):
-    exchange = ccxt.binance()
+# --- DEDEKTİF FONKSİYONU ---
+async def list_available_models():
+    # Google'a "Elinde ne var ne yok göster" diyoruz
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+    
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        return df
-    except: return None
-
-def fetch_news(symbol):
-    coin_ticker = symbol.replace("USDT", "").upper()
-    rss_url = f"https://cryptopanic.com/news/rss/currency/{coin_ticker}/"
-    try:
-        feed = feedparser.parse(rss_url)
-        return [entry.title for entry in feed.entries[:3]] if feed.entries else []
-    except: return []
-
-def analyze_market(symbol):
-    df_4h = fetch_data(symbol, '4h')
-    df_15m = fetch_data(symbol, '15m')
-    if df_4h is None or df_15m is None: return None
-
-    current_price = df_4h['close'].iloc[-1]
-    
-    ema_50 = calculate_ema(df_4h['close'], 50).iloc[-1]
-    rsi_series = calculate_rsi(df_4h['close'], 14)
-    rsi_4h = rsi_series.iloc[-1]
-    vol_sma = calculate_sma(df_4h['volume'], 20).iloc[-1]
-    current_vol = df_4h['volume'].iloc[-1]
-    rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
-
-    score = 0
-    diff_percent = ((current_price - ema_50) / ema_50) * 100
-    
-    if diff_percent > 3: score += 30
-    elif diff_percent > 1: score += 20
-    elif diff_percent > 0: score += 10
-    elif diff_percent < -3: score -= 30
-    elif diff_percent < -1: score -= 20
-    else: score -= 10
-
-    vol_ratio = current_vol / vol_sma if vol_sma > 0 else 1
-    if vol_ratio > 2.0: score += (20 if score > 0 else -20)
-    elif vol_ratio > 1.2: score += (10 if score > 0 else -10)
-
-    if rsi_4h < 25: score += 30
-    elif rsi_4h < 35: score += 20
-    elif rsi_4h > 75: score -= 30
-    elif rsi_4h > 65: score -= 20
-
-    if score > 0:
-        if rsi_15m < 30: score += 20
-        elif rsi_15m < 50: score += 10
-        elif rsi_15m > 70: score -= 15
-    else:
-        if rsi_15m > 70: score -= 20
-        elif rsi_15m > 50: score -= 10
-        elif rsi_15m < 30: score += 15
-
-    direction = "YÜKSELİŞ (LONG) 🟢" if score > 0 else "DÜŞÜŞ (SHORT) 🔴"
-    
-    recent_high = df_4h['high'].tail(50).max()
-    recent_low = df_4h['low'].tail(50).min()
-    
-    if score > 0:
-        tp = recent_high
-        sl = recent_low * 0.99
-    else:
-        tp = recent_low
-        sl = recent_high * 1.01
-
-    return {
-        "symbol": symbol, "price": current_price, "score": score, 
-        "direction": direction, "tp": tp, "sl": sl,
-        "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
-    }
-
-# --- AI YORUMU (V5.1 - PRO ÖNCELİKLİ) ---
-async def get_ai_comment(data, news):
-    prompt = (
-        f"Sen usta bir kripto analistisin. Verileri yorumla:\n"
-        f"Coin: {data['symbol']} | Fiyat: {data['price']:.2f}\n"
-        f"Teknik Skor: {data['score']}/100 | Yön: {data['direction']}\n"
-        f"RSI(4h): {data['rsi_4h']:.1f} | RSI(15m): {data['rsi_15m']:.1f}\n"
-        f"Haber Başlıkları: {', '.join(news)}\n\n"
-        f"GÖREV: Bu verileri kullanarak Türkçe, samimi ve yatırımcıya net bir tavsiye ver. Riskleri de belirt."
-    )
-    
-    # SENİN İSTEĞİN ÜZERİNE GÜNCELLENEN SIRALAMA:
-    # 1. Önce en zeki modeli dene (Pro)
-    # 2. Olmazsa hızlıyı dene (Flash)
-    # 3. O da olmazsa eskiyi dene (1.0 Pro)
-    models_to_try = [
-        "gemini-1.5-pro",   # <-- İLK SIRADA ARTIK BU VAR
-        "gemini-1.5-flash", 
-        "gemini-1.0-pro"
-    ]
-    
-    last_error = ""
-
-    for model_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-
-        try:
-            response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload)
-            
-            if response.status_code == 200:
-                result = response.json()
-                try:
-                    text = result['candidates'][0]['content']['parts'][0]['text']
-                    # Hangi modelin cevap verdiğini de yazdıralım ki bilelim
-                    return f"🧠 (Model: {model_name})\n{text}"
-                except:
-                    last_error = "Cevap formatı bozuk."
-            else:
-                last_error = f"{model_name} Hatası: {response.status_code}"
-                continue 
+        response = await asyncio.to_thread(requests.get, url)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'models' in data:
+                # Sadece sohbet edebilen modelleri filtrele
+                chat_models = [m['name'] for m in data['models'] if 'generateContent' in m['supportedGenerationMethods']]
                 
-        except Exception as e:
-            last_error = str(e)
-            continue
-
-    return f"⚠️ Tüm modeller denendi. Hata: {last_error}"
+                if not chat_models:
+                    return "⚠️ Google cevap verdi ama sohbet modeli bulamadı. API Key yetkilerini kontrol et."
+                
+                # Modelleri listele
+                model_list = "\n".join(chat_models)
+                return f"✅ İŞTE GOOGLE'IN KABUL ETTİĞİ LİSTE:\n\n{model_list}\n\n(Bu listeyi bana kopyala at!)"
+            else:
+                return "⚠️ Liste boş döndü."
+        else:
+            return f"❌ BAĞLANTI HATASI ({response.status_code}):\n{response.text}"
+            
+    except Exception as e:
+        return f"❌ KRİTİK HATA: {str(e)}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
-    symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 {symbol} için en iyi Yapay Zeka aranıyor...")
-
-    data = analyze_market(symbol)
-    if not data: return await update.message.reply_text("❌ Veri alınamadı.")
-
-    news = fetch_news(symbol)
-    ai_comment = await get_ai_comment(data, news)
+    await update.message.reply_text("🕵️‍♂️ Google sunucularına bağlanıp model listesi isteniyor... Bekle.")
     
-    strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
-
-    msg = (
-        f"💎 *{symbol} ANALİZ (V5.1 - Pro First)*\n"
-        f"📊 Yön: {data['direction']}\n"
-        f"🏆 Skor: {data['score']} {strength}\n"
-        f"💵 Fiyat: {data['price']:.4f}\n\n"
-        f"🧠 *AI Yorumu:*\n{ai_comment}\n\n"
-        f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
-    )
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    # Dedektif çalışıyor
+    result = await list_available_models()
+    
+    await update.message.reply_text(result)
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
