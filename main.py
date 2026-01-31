@@ -17,7 +17,8 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     print("❌ HATA: API Anahtarları EKSİK!")
     sys.exit(1)
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Logları hemen basması için force=True
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
 
 exchange = ccxt.binance({
     'enableRateLimit': True,
@@ -70,53 +71,71 @@ def calculate_indicators(df):
     ema_50 = close.ewm(span=50, adjust=False).mean()
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1]
 
-# --- 4. AI MOTORU (SADE VE ÖZ) ---
+# --- 4. AI MOTORU (RESMİ LİSTEYE GÖRE GÜNCELLENDİ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
         f"Kripto Analistisin. Coin: {symbol}\n"
-        f"Veriler: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
+        f"Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
         f"{news_text}\n"
-        f"GÖREV: Yatırımcıya net bir STRATEJİ (Giriş, Hedef, Stop) ver."
+        f"GÖREV: Net bir AL/SAT stratejisi yaz. Giriş, Hedef ve Stop ver."
     )
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # --- SADECE RESMİ MODELLER (Macera Yok) ---
+    # --- SENİN LİSTENDEN SEÇİLEN KADRO ---
     models = [
-        # 1. Ana Beyin (Zeki)
-        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),
+        # 1. EN ZEKİ (Amiral Gemisi)
+        ("Gemini 2.5 Pro", "gemini-2.5-pro"),
         
-        # 2. Yedek Beyin (Hızlı)
-        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10)
+        # 2. EN YENİ VE ZEKİ (Alternatif)
+        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview"),
+        
+        # 3. YENİ NESİL HIZLI (Dengeleyici)
+        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
+        
+        # 4. GÜVENİLİR HIZLI (Sağlamcı)
+        ("Gemini 2.0 Flash", "gemini-2.0-flash"),
+        
+        # 5. SON KALE (Bu model asla ölmez)
+        ("Gemini Flash Latest", "gemini-flash-latest")
     ]
-    # DİKKAT: 8b, exp, latest gibi modellerin hepsi silindi. Hata 404 imkansız.
 
     last_error = ""
-    for name, model_id, timeout in models:
+    
+    for name, model_id in models:
         try:
+            print(f"🧠 Deneniyor: {name} ({model_id})...") 
+            # API URL'sini senin verdiğin "models/" ön ekini dikkate alarak düzenledim
+            # Not: API çağrısında bazen "models/" kısmı url'de zaten vardır, bazen yoktur.
+            # En güvenli yöntem direkt model adını kullanmaktır.
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
-            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=timeout)
+            
+            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=12)
             
             if resp.status_code == 200:
+                print(f"✅ BAŞARILI: {name}")
                 raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
-                return clean_markdown(raw_text) + f"\n\n_(🧠 Model: {name})_"
+                return clean_markdown(raw_text) + f"\n\n_(🧠 Çalışan Model: {name})_"
             else:
-                last_error = f"Kod {resp.status_code}"
-                continue # Diğer modele geç
+                error_msg = f"Kod {resp.status_code}"
+                print(f"❌ {name} Başarısız: {error_msg}")
+                last_error += f"\n{name}: {error_msg}"
+                continue
         except Exception as e:
-            last_error = str(e)
+            print(f"⚠️ {name} Hatası: {str(e)}")
+            last_error += f"\n{name}: {str(e)}"
             continue
             
-    return f"⚠️ Analiz Alınamadı. (Sebep: {last_error} - Kota dolmuş olabilir, lütfen bekleyin)"
+    return f"⚠️ Hiçbir model çalışmadı. Detay:\n{last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* analiz ediliyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* için listedeki 5 model deneniyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -134,13 +153,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veri Hazır. AI stratejisi bekleniyor...")
+    try: await msg.edit_text(f"✅ Veri Tamam. Uygun model aranıyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title)
 
     final_text = (
-        f"💎 *{symbol} ANALİZ (V11.0)* 💎\n\n"
+        f"💎 *{symbol} ANALİZ (V13.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *RSI:* `{rsi:.2f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
@@ -156,7 +175,8 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V11.0 (FINAL STABLE) ÇALIŞIYOR...")
+    print("🚀 BOT V13.0 (OFFICIAL LIST) ÇALIŞIYOR...")
+    sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
