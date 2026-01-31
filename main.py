@@ -83,7 +83,6 @@ def analyze_market(symbol):
     rsi_4h = calculate_rsi(df_4h['close'], 14).iloc[-1]
     rsi_15m = calculate_rsi(df_15m['close'], 14).iloc[-1]
     
-    # Basit Skorlama
     score = 0
     diff_percent = ((current_price - ema_50) / ema_50) * 100
     if diff_percent > 0: score += 10
@@ -100,7 +99,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (CANLI STATUS GÜNCELLEMELİ) ---
+# --- AI YORUMU (ANTI-FLOOD SİSTEMİ) ---
 async def get_ai_comment(data, news, status_msg):
     if news: news_text = "\n".join([f"- {n}" for n in news])
     else: news_text = "Haber yok."
@@ -117,7 +116,7 @@ async def get_ai_comment(data, news, status_msg):
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # Model Listesi (Sırayla denenecek)
+    # Model Listesi
     models = [
         ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview"),
         ("Gemini 2.5 Pro", "gemini-2.5-pro"),
@@ -126,51 +125,56 @@ async def get_ai_comment(data, news, status_msg):
         ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite")
     ]
 
+    last_error = ""
+
     for model_name, model_id in models:
         try:
-            # Kullanıcıya bilgi ver
-            await status_msg.edit_text(f"🧠 Düşünüyor: {model_name}...")
+            # Telegram mesajını güncellemeye çalış (Hata verirse yut ve devam et)
+            try:
+                await status_msg.edit_text(f"🧠 Düşünüyor: {model_name}...")
+            except:
+                pass # Telegram "Çok hızlısın" derse takma, işine bak.
             
+            # Google'a İsteği At
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
             response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=25)
             
             if response.status_code == 200:
                 return response.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n_(👑 Analiz: {model_name})_"
             else:
-                print(f"{model_name} Hatası: {response.status_code}")
-                # Hata alınca hemen diğer modele geç
+                last_error = f"Kod: {response.status_code} - {response.text[:50]}"
+                print(f"{model_name} Hatası: {last_error}")
+                # Hata alınca biraz bekle ki Telegram spam sanmasın
+                await asyncio.sleep(1)
                 continue 
         except Exception as e:
+            last_error = str(e)
             print(f"{model_name} Bağlantı Hatası: {e}")
+            await asyncio.sleep(1)
             continue
 
-    return "⚠️ HATA: Hiçbir yapay zeka modeli cevap veremedi. (Yoğunluk veya Kota Sorunu)"
+    return f"⚠️ HATA: Tüm modeller denendi ama başarısız oldu.\nSon Hata: {last_error}"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    # 1. İlk Mesajı At
-    status_msg = await update.message.reply_text(f"🔍 {symbol} için veriler toplanıyor...")
+    status_msg = await update.message.reply_text(f"🔍 {symbol} verileri toplanıyor...")
 
-    # 2. Verileri Çek
     data = analyze_market(symbol)
     if not data:
         return await status_msg.edit_text("❌ Veri alınamadı (Binance Bağlantı Hatası).")
     
-    await status_msg.edit_text(f"✅ Veri alındı. Haberlere bakılıyor...")
-    
-    # 3. Haberleri Çek
     news = fetch_news(symbol)
     
-    # 4. AI Analizi (Sürekli Güncelleme Yapacak)
+    # AI Analizini Başlat
     ai_comment = await get_ai_comment(data, news, status_msg)
     
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V8.4 - Live Status)*\n"
+        f"💎 *{symbol} ANALİZ (V8.5 - Anti-Flood)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
@@ -178,8 +182,11 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
     )
     
-    # Sonucu düzenleyerek yaz (Yeni mesaj atmaz, eskisini değiştirir)
-    await status_msg.edit_text(msg, parse_mode='Markdown')
+    # Mesajı düzenlemeyi dene, olmazsa yeni mesaj at
+    try:
+        await status_msg.edit_text(msg, parse_mode='Markdown')
+    except:
+        await update.message.reply_text(msg, parse_mode='Markdown')
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
