@@ -27,6 +27,7 @@ exchange = ccxt.binance({
 # --- TEMİZLEYİCİ ---
 def clean_markdown(text):
     if not text: return ""
+    # Telegram'ı bozan karakterleri temizle
     return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
 
 # --- 1. VERİ ---
@@ -70,19 +71,25 @@ def calculate_indicators(df):
     ema_50 = close.ewm(span=50, adjust=False).mean()
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1]
 
-# --- 4. AI MOTORU (KURTARICI MODEL GERİ GELDİ) ---
+# --- 4. AI MOTORU (5 KATMANLI GARANTİ SİSTEMİ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
-    news_text = f"Haber: {news_title}" if news_title else "Önemli haber yok."
+    news_text = f"Son Dakika: {news_title}" if news_title else "Haber Akışı: Nötr"
     
     prompt = (
-        f"Kripto Analisti. Coin: {symbol}\n"
-        f"Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
+        f"Dünyaca Ünlü Kripto Stratejisti gibi davran. Coin: {symbol}\n"
+        f"Teknik Veri: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
         f"{news_text}\n"
-        f"GÖREV: Yatırımcıya işlem açması için net bir GİRİŞ, HEDEF (TP) ve STOP (SL) noktası ver."
+        f"GÖREV: Yatırımcıya net bir yol haritası çiz.\n"
+        f"ÇIKTI FORMATI:\n"
+        f"ANALİZ: (Tekniği ve haberi 1 cümleyle yorumla)\n"
+        f"STRATEJİ: (Long/Short veya Bekle)\n"
+        f"GİRİŞ: (İdeal alım/satım bölgesi)\n"
+        f"HEDEF (TP): (Kar alma noktası)\n"
+        f"STOP (SL): (Zarar kesme noktası)"
     )
     headers = {'Content-Type': 'application/json'}
     
-    # Sansür Engelleyici (Block None)
+    # Sansür Engelleyici
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "safetySettings": [
@@ -93,17 +100,22 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
         ]
     }
 
-    # --- KAZANAN KADRO (V10.1) ---
+    # --- İŞTE SENİN 5'Lİ YILDIZ TAKIMIN ---
     models = [
-        # 1. PRESTİJ (Gemini 1.5 Pro) - En zeki ama çabuk yorulur (Kota).
-        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),      
+        # 1. KAPTAN (En Zeki) - Derin analiz yapar.
+        ("Gemini 1.5 Pro", "gemini-1.5-pro", 25),      
         
-        # 2. KURTARICI (Gemini 2.0 Flash Exp) - V9.9'da çalışan kahraman model.
-        # Bu modelin kotası ayrıdır, Pro yorulsa bile bu çalışır.
-        ("Gemini 2.0 Flash Exp", "gemini-2.0-flash-exp", 15), 
+        # 2. YARDIMCI KAPTAN (En Zeki Alternatif) - Kaptan meşgulse bu bakar.
+        ("Gemini 1.5 Pro Latest", "gemini-1.5-pro-latest", 25),
         
-        # 3. KALE (Gemini 1.5 Flash) - En eski ve sağlam model.
-        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10)
+        # 3. YENİ YILDIZ (Hızlı ve Zeki) - 2.0 teknolojisi.
+        ("Gemini 2.0 Flash Exp", "gemini-2.0-flash-exp", 15),
+
+        # 4. ORTA SAHA (Güvenilir) - Standart sağlam model.
+        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10),
+
+        # 5. KALECİ (Hızlı Kurtarıcı) - Eğer hepsi hata verirse bu mutlaka tutar.
+        ("Gemini 1.5 Flash-8B", "gemini-1.5-flash-8b", 8) 
     ]
 
     last_error = ""
@@ -124,14 +136,14 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
             last_error = str(e)
             continue
             
-    return f"⚠️ Analiz Alınamadı. Son Hata: {last_error}\n(Lütfen 1 dakika bekleyin, kota dolmuş olabilir)"
+    return f"⚠️ 5 Model de denendi ama sonuç alınamadı. (Son Hata: {last_error})"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("❌ Kullanım: `/incele BTCUSDT`")
+    if not context.args: return await update.message.reply_text("❌ Örnek: `/incele ETHUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* için 5 farklı yapay zeka taranıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -149,13 +161,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veri Hazır. Analiz motoru çalışıyor...")
+    try: await msg.edit_text(f"✅ Veri Hazır. Analiz zinciri çalışıyor (1-5)...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title)
 
     final_text = (
-        f"💎 *{symbol} ULTRA ANALİZ (V10.1)* 💎\n\n"
+        f"💎 *{symbol} PENTAGON ANALİZ (V10.3)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *RSI:* `{rsi:.2f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
@@ -171,7 +183,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V10.1 (RESURRECTION) ÇALIŞIYOR...")
+    print("🚀 BOT V10.3 (THE PENTAGON) ÇALIŞIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
