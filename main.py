@@ -27,7 +27,6 @@ exchange = ccxt.binance({
 # --- TEMİZLEYİCİ ---
 def clean_markdown(text):
     if not text: return ""
-    # Telegram'ı bozan karakterleri temizle
     return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
 
 # --- 1. VERİ ---
@@ -71,58 +70,32 @@ def calculate_indicators(df):
     ema_50 = close.ewm(span=50, adjust=False).mean()
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1]
 
-# --- 4. AI MOTORU (5 KATMANLI GARANTİ SİSTEMİ) ---
+# --- 4. AI MOTORU (SADE VE ÖZ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
-    news_text = f"Son Dakika: {news_title}" if news_title else "Haber Akışı: Nötr"
+    news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
-        f"Dünyaca Ünlü Kripto Stratejisti gibi davran. Coin: {symbol}\n"
-        f"Teknik Veri: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
+        f"Kripto Analistisin. Coin: {symbol}\n"
+        f"Veriler: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
         f"{news_text}\n"
-        f"GÖREV: Yatırımcıya net bir yol haritası çiz.\n"
-        f"ÇIKTI FORMATI:\n"
-        f"ANALİZ: (Tekniği ve haberi 1 cümleyle yorumla)\n"
-        f"STRATEJİ: (Long/Short veya Bekle)\n"
-        f"GİRİŞ: (İdeal alım/satım bölgesi)\n"
-        f"HEDEF (TP): (Kar alma noktası)\n"
-        f"STOP (SL): (Zarar kesme noktası)"
+        f"GÖREV: Yatırımcıya net bir STRATEJİ (Giriş, Hedef, Stop) ver."
     )
     headers = {'Content-Type': 'application/json'}
-    
-    # Sansür Engelleyici
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-        ]
-    }
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # --- İŞTE SENİN 5'Lİ YILDIZ TAKIMIN ---
+    # --- SADECE RESMİ MODELLER (Macera Yok) ---
     models = [
-        # 1. KAPTAN (En Zeki) - Derin analiz yapar.
-        ("Gemini 1.5 Pro", "gemini-1.5-pro", 25),      
+        # 1. Ana Beyin (Zeki)
+        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),
         
-        # 2. YARDIMCI KAPTAN (En Zeki Alternatif) - Kaptan meşgulse bu bakar.
-        ("Gemini 1.5 Pro Latest", "gemini-1.5-pro-latest", 25),
-        
-        # 3. YENİ YILDIZ (Hızlı ve Zeki) - 2.0 teknolojisi.
-        ("Gemini 2.0 Flash Exp", "gemini-2.0-flash-exp", 15),
-
-        # 4. ORTA SAHA (Güvenilir) - Standart sağlam model.
-        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10),
-
-        # 5. KALECİ (Hızlı Kurtarıcı) - Eğer hepsi hata verirse bu mutlaka tutar.
-        ("Gemini 1.5 Flash-8B", "gemini-1.5-flash-8b", 8) 
+        # 2. Yedek Beyin (Hızlı)
+        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10)
     ]
+    # DİKKAT: 8b, exp, latest gibi modellerin hepsi silindi. Hata 404 imkansız.
 
     last_error = ""
-    
     for name, model_id, timeout in models:
         try:
-            print(f"🧠 Deneniyor: {name}...") 
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
             resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=timeout)
             
@@ -131,19 +104,19 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
                 return clean_markdown(raw_text) + f"\n\n_(🧠 Model: {name})_"
             else:
                 last_error = f"Kod {resp.status_code}"
-                continue
+                continue # Diğer modele geç
         except Exception as e:
             last_error = str(e)
             continue
             
-    return f"⚠️ 5 Model de denendi ama sonuç alınamadı. (Son Hata: {last_error})"
+    return f"⚠️ Analiz Alınamadı. (Sebep: {last_error} - Kota dolmuş olabilir, lütfen bekleyin)"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("❌ Örnek: `/incele ETHUSDT`")
+    if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* için 5 farklı yapay zeka taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* analiz ediliyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -161,13 +134,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veri Hazır. Analiz zinciri çalışıyor (1-5)...")
+    try: await msg.edit_text(f"✅ Veri Hazır. AI stratejisi bekleniyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title)
 
     final_text = (
-        f"💎 *{symbol} PENTAGON ANALİZ (V10.3)* 💎\n\n"
+        f"💎 *{symbol} ANALİZ (V11.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *RSI:* `{rsi:.2f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
@@ -183,7 +156,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V10.3 (THE PENTAGON) ÇALIŞIYOR...")
+    print("🚀 BOT V11.0 (FINAL STABLE) ÇALIŞIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
