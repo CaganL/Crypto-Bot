@@ -142,14 +142,12 @@ async def get_ai_comment(data, news, status_msg):
             if response.status_code == 200:
                 return response.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n_(👑 Analiz: {model_name})_"
             else:
-                last_error = f"Kod: {response.status_code} - {response.text[:50]}"
-                print(f"{model_name} Hatası: {last_error}")
+                last_error = f"Kod: {response.status_code}"
                 # Hata alınca biraz bekle ki Telegram spam sanmasın
                 await asyncio.sleep(1)
                 continue 
         except Exception as e:
             last_error = str(e)
-            print(f"{model_name} Bağlantı Hatası: {e}")
             await asyncio.sleep(1)
             continue
 
@@ -182,7 +180,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
     )
     
-    # Mesajı düzenlemeyi dene, olmazsa yeni mesaj at
+    # KİLİT NOKTA: Mesajı düzenlemeyi dene, olmazsa YENİ mesaj at
     try:
         await status_msg.edit_text(msg, parse_mode='Markdown')
     except:
