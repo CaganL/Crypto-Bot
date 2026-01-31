@@ -29,7 +29,7 @@ def clean_markdown(text):
     if not text: return ""
     return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
 
-# --- 1. VERİ ÇEKME ---
+# --- 1. VERİ ---
 def fetch_data(symbol, timeframe='4h'):
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
@@ -48,59 +48,59 @@ def fetch_data(symbol, timeframe='4h'):
         return df
     except: return None
 
-# --- 2. HABERLER (KİMLİK KARTI EKLENDİ) ---
+# --- 2. HABER ---
 def fetch_news(symbol):
     try:
         coin = symbol.replace("USDT", "").upper()
-        # RSS beslemesini requests ile çekip, user-agent ekliyoruz
         url = f"https://cryptopanic.com/news/rss/currency/{coin}/"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
-        
-        # Gelen veriyi feedparser'a ver
         feed = feedparser.parse(response.content)
-        
         if feed.entries:
             return clean_markdown(feed.entries[0].title)
-    except Exception as e:
-        print(f"Haber Hatası: {e}")
-        return None
+    except: return None
     return None
 
-# --- 3. TEKNİK (DESTEK/DİRENÇ EKLENDİ) ---
+# --- 3. TEKNİK (YENİ: PIVOT HESAPLAMA) ---
 def calculate_indicators(df):
     if df is None: return 0, 0, 0, 0, 0
     close = df['close']
     
-    # RSI
+    # RSI & EMA
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     rsi = 100 - (100 / (1 + gain / loss))
-    
-    # EMA 50
     ema_50 = close.ewm(span=50, adjust=False).mean()
     
-    # --- YENİ: DESTEK VE DİRENÇ HESAPLAMA ---
-    # Son 50 mumun en düşüğü (Destek) ve en yükseği (Direnç)
-    support = df['low'].tail(50).min()
-    resistance = df['high'].tail(50).max()
+    # --- PIVOT POINT HESAPLAMA (TRADER USULÜ) ---
+    # Son tamamlanmış mumun verilerini al (Current candle değil, bir önceki)
+    last_candle = df.iloc[-2]
+    high = last_candle['high']
+    low = last_candle['low']
+    close_prev = last_candle['close']
     
-    return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], support, resistance
+    # Pivot (Denge) Noktası
+    pivot = (high + low + close_prev) / 3
+    
+    # Destek 1 (S1) - Talep Bölgesi
+    support_1 = (2 * pivot) - high
+    
+    # Direnç 1 (R1) - Arz Bölgesi
+    resistance_1 = (2 * pivot) - low
+    
+    return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], support_1, resistance_1
 
-# --- 4. AI MOTORU (MATEMATİK DESTEKLİ) ---
+# --- 4. AI MOTORU (PIVOT BİLGİSİYLE) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, support, resistance):
-    news_text = f"Son Dakika: {news_title}" if news_title else "Piyasa Haberi Yok"
+    news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
         f"Kripto Analistisin. Coin: {symbol}\n"
-        f"Veriler: Fiyat {price:.2f} | RSI {rsi:.1f} | Yön {direction}\n"
-        f"Teknik Seviyeler: Ana Destek {support:.2f} | Ana Direnç {resistance:.2f}\n"
+        f"Fiyat: {price:.4f} | RSI: {rsi:.1f} | Yön: {direction}\n"
+        f"Pivot Seviyeleri -> Güçlü Destek (Talep): {support:.4f} | Güçlü Direnç (Satış): {resistance:.4f}\n"
         f"{news_text}\n"
-        f"GÖREV: Bu teknik seviyeleri (Destek/Direnç) kullanarak mantıklı bir işlem stratejisi kur.\n"
-        f"ÇIKTI: Net bir Giriş, Hedef ve Stop noktası ver."
+        f"GÖREV: Bu Pivot seviyelerini baz alarak PROFESYONEL bir işlem stratejisi (Giriş, Hedef, Stop) oluştur."
     )
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -136,12 +136,12 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* için Pivot Noktaları hesaplanıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
     
-    # Yeni fonksiyonu çağır (5 değer dönecek)
+    # Yeni fonksiyon (Pivot'lu)
     price, rsi, ema, support, resistance = calculate_indicators(df)
     news_title = fetch_news(symbol)
     
@@ -155,23 +155,22 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veri ve Haberler çekildi. AI düşünüyor...")
+    try: await msg.edit_text(f"✅ Pivotlar Hazır. AI stratejiyi kuruyor...")
     except: pass
 
-    # AI'ya yeni parametreleri gönder
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, support, resistance)
 
     final_text = (
-        f"💎 *{symbol} ANALİST (V14.0)* 💎\n\n"
+        f"💎 *{symbol} SMART ANALİZ (V15.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *RSI:* `{rsi:.2f}`\n"
-        f"🛡️ *Destek:* `{support:.2f}`\n"
-        f"🚧 *Direnç:* `{resistance:.2f}`\n"
+        f"🛡️ *Pivot Destek:* `{support:.4f}`\n"
+        f"🚧 *Pivot Direnç:* `{resistance:.4f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
-        f"📰 *Haber:* {news_title if news_title else 'Akış Sakin'}\n"
+        f"📰 *Haber:* {news_title if news_title else 'Nötr'}\n"
         f"───────────────────\n\n"
-        f"🧠 *Strateji:*\n{comment}"
+        f"🧠 *Profesyonel Strateji:*\n{comment}"
     )
     
     try:
@@ -180,7 +179,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V14.0 (THE ANALYST) ÇALIŞIYOR...")
+    print("🚀 BOT V15.0 (SMART PIVOT) ÇALIŞIYOR...")
     sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
