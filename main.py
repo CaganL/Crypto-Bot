@@ -99,8 +99,9 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (ANTI-FLOOD SİSTEMİ) ---
-async def get_ai_comment(data, news, status_msg):
+# --- AI YORUMU (V8.6 - SESSİZ MOD) ---
+# Burada Telegram mesajını güncellemeye çalışmıyoruz. Sadece sonucu döndürüyoruz.
+async def get_ai_comment(data, news):
     if news: news_text = "\n".join([f"- {n}" for n in news])
     else: news_text = "Haber yok."
 
@@ -125,54 +126,47 @@ async def get_ai_comment(data, news, status_msg):
         ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite")
     ]
 
-    last_error = ""
-
     for model_name, model_id in models:
         try:
-            # Telegram mesajını güncellemeye çalış (Hata verirse yut ve devam et)
-            try:
-                await status_msg.edit_text(f"🧠 Düşünüyor: {model_name}...")
-            except:
-                pass # Telegram "Çok hızlısın" derse takma, işine bak.
+            print(f"🧠 Deneniyor: {model_name}...") # Sadece loglara yaz, Telegram'a değil
             
-            # Google'a İsteği At
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
             response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=25)
             
             if response.status_code == 200:
+                print(f"✅ BAŞARILI: {model_name}")
                 return response.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n_(👑 Analiz: {model_name})_"
             else:
-                last_error = f"Kod: {response.status_code}"
-                # Hata alınca biraz bekle ki Telegram spam sanmasın
-                await asyncio.sleep(1)
+                print(f"❌ {model_name} Başarısız: {response.status_code}")
                 continue 
         except Exception as e:
-            last_error = str(e)
-            await asyncio.sleep(1)
+            print(f"⚠️ {model_name} Hatası: {e}")
             continue
 
-    return f"⚠️ HATA: Tüm modeller denendi ama başarısız oldu.\nSon Hata: {last_error}"
+    return "⚠️ HATA: Hiçbir yapay zeka modeli cevap veremedi. (API Key veya Kota Sorunu)"
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    status_msg = await update.message.reply_text(f"🔍 {symbol} verileri toplanıyor...")
+    # 1. İlk Mesaj (Bunu bir daha düzenlemeyeceğiz ki spam olmasın)
+    await update.message.reply_text(f"🔍 {symbol} analizi başlatıldı. Lütfen 10-15 saniye bekleyin...")
 
+    # 2. Verileri Çek
     data = analyze_market(symbol)
     if not data:
-        return await status_msg.edit_text("❌ Veri alınamadı (Binance Bağlantı Hatası).")
+        return await update.message.reply_text("❌ Veri alınamadı (Binance Bağlantı Hatası).")
     
     news = fetch_news(symbol)
     
-    # AI Analizini Başlat
-    ai_comment = await get_ai_comment(data, news, status_msg)
+    # 3. AI Analizi (SESSİZCE YAPACAK)
+    ai_comment = await get_ai_comment(data, news)
     
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V8.5 - Anti-Flood)*\n"
+        f"💎 *{symbol} ANALİZ (V8.6 - Final Stable)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
@@ -180,11 +174,8 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
     )
     
-    # KİLİT NOKTA: Mesajı düzenlemeyi dene, olmazsa YENİ mesaj at
-    try:
-        await status_msg.edit_text(msg, parse_mode='Markdown')
-    except:
-        await update.message.reply_text(msg, parse_mode='Markdown')
+    # 4. SONUÇ: Yeni mesaj olarak at (Garantili Yöntem)
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
