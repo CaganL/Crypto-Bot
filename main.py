@@ -8,6 +8,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
 import os
 import sys
+from datetime import datetime
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -32,9 +33,10 @@ def clean_markdown(text):
 # --- 1. VERİ ---
 def fetch_data(symbol, timeframe='4h'):
     try:
-        # Son 100 mumu çekiyoruz (Hem Macro hem Micro analiz için)
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # Timestamp'i okunabilir tarihe çevir
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
     except: pass
     
@@ -45,7 +47,9 @@ def fetch_data(symbol, timeframe='4h'):
         data = resp.json()
         df = pd.DataFrame(data, columns=['t', 'open', 'high', 'low', 'close', 'v', 'ct', 'qv', 'n', 'tb', 'tq', 'i'])
         df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'v': float})
-        df.rename(columns={'v': 'volume'}, inplace=True)
+        df.rename(columns={'v': 'volume', 't': 'timestamp'}, inplace=True)
+        # Timestamp düzeltme
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
     except: return None
 
@@ -62,7 +66,7 @@ def fetch_news(symbol):
     except: return None
     return None
 
-# --- 3. TEKNİK (HİBRİT ANALİZ VERİSİ) ---
+# --- 3. TEKNİK (TANE TANE VERİ HAZIRLIĞI) ---
 def calculate_indicators(df):
     if df is None: return 0, 0, 0, 0, 0, ""
     close = df['close']
@@ -74,38 +78,38 @@ def calculate_indicators(df):
     rsi = 100 - (100 / (1 + gain / loss))
     ema_50 = close.ewm(span=50, adjust=False).mean()
     
-    # --- MACRO VIEW (GENİŞ AÇI - 100 MUM) ---
-    # Son 100 mumun (yaklaşık 16 gün) en düşüğü ve en yükseği
+    # --- MACRO VIEW ---
     macro_low = df['low'].min()
     macro_high = df['high'].max()
     
-    # --- MICRO VIEW (YAKIN ÇEKİM - 12 MUM) ---
-    # Son 12 mumun (48 Saat) detaylı hareketi
+    # --- MICRO VIEW (OKUNABİLİR FORMAT) ---
+    # Son 12 mumu alıp tarihleriyle beraber liste yapıyoruz
     history_str = ""
     last_candles = df.tail(12) 
     
     for index, row in last_candles.iterrows():
-        # Her mumun detayını yazıyoruz
-        history_str += f"[H:{row['high']:.0f}|L:{row['low']:.0f}|C:{row['close']:.0f}] "
+        # Tarihi gün ve saat olarak biçimlendir (Örn: 01-02 14:00)
+        time_str = row['timestamp'].strftime('%d/%m %H:%M')
+        # Daha net format
+        history_str += f"* Tarih: {time_str} -> Kapanış: {row['close']:.4f} | En Yüksek: {row['high']:.4f}\n"
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (ÇİFT GÖZLÜK) ---
+# --- 4. AI MOTORU ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
-        f"Sen Kıdemli Kripto Analistisin. Coin: {symbol}\n"
-        f"Anlık Fiyat: {price:.2f} | RSI: {rsi:.1f} | Yön: {direction}\n\n"
-        f"1. GENİŞ AÇI (Son 16 Günün Özeti):\n"
-        f"   - Ana Destek (Dip): {macro_low:.2f}\n"
-        f"   - Ana Direnç (Tepe): {macro_high:.2f}\n\n"
-        f"2. YAKIN ÇEKİM (Son 48 Saatin Hareketi):\n"
-        f"   {history_str}\n\n"
+        f"Kripto Analistisin. Coin: {symbol}\n"
+        f"ANLIK DURUM -> Fiyat: {price:.4f} | RSI: {rsi:.1f} | Yön: {direction}\n\n"
+        f"1. GENİŞ AÇI (Son 16 Gün):\n"
+        f"   - Dip Noktası: {macro_low:.4f}\n"
+        f"   - Tepe Noktası: {macro_high:.4f}\n\n"
+        f"2. YAKIN ÇEKİM (Son 48 Saat Mumları - DETAYLI LİSTE):\n"
+        f"Aşağıdaki listeyi incele ve fiyat hareketini yorumla:\n"
+        f"{history_str}\n\n"
         f"{news_text}\n\n"
-        f"GÖREV: Bu iki veriyi birleştir.\n"
-        f"- Eğer kısa vadeli hareket dar bir alandaysa (Range), geniş açıdaki ana destek/dirençlere göre uyar.\n"
-        f"- Tuzağa düşme. Net bir Giriş, Hedef ve Stop stratejisi kur."
+        f"GÖREV: Yukarıdaki mum listesine bakarak destek/dirençleri tespit et ve strateji oluştur."
     )
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -141,12 +145,12 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* için Geniş ve Dar açı analiz ediliyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* grafik zaman çizelgesi çıkarılıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
     
-    # 6 Değer dönüyor (Macro + Micro veriler)
+    # 6 Değer dönüyor
     price, rsi, ema, macro_low, macro_high, history_str = calculate_indicators(df)
     news_title = fetch_news(symbol)
     
@@ -160,16 +164,16 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Büyük Resim ve Detaylar hazır. AI yorumluyor...")
+    try: await msg.edit_text(f"✅ Mum verileri tarihe göre sıralandı. AI inceliyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} HYBRID ANALİZ (V17.0)* 💎\n\n"
+        f"💎 *{symbol} CRYSTAL ANALİZ (V17.1)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
-        f"🌍 *Ana Dip (16 Gün):* `{macro_low:.2f}`\n"
-        f"🏔️ *Ana Tepe (16 Gün):* `{macro_high:.2f}`\n"
+        f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
+        f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
         f"📰 *Haber:* {news_title if news_title else 'Akış Sakin'}\n"
@@ -183,7 +187,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V17.0 (THE HYBRID EYE) ÇALIŞIYOR...")
+    print("🚀 BOT V17.1 (CRYSTAL CLEAR) ÇALIŞIYOR...")
     sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
