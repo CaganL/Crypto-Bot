@@ -70,19 +70,19 @@ def calculate_indicators(df):
     ema_50 = close.ewm(span=50, adjust=False).mean()
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1]
 
-# --- 4. AI MOTORU (SANSÜRSÜZ VE KOTA DOSTU) ---
+# --- 4. AI MOTORU (KURTARICI MODEL GERİ GELDİ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
     news_text = f"Haber: {news_title}" if news_title else "Önemli haber yok."
     
     prompt = (
-        f"Kripto Analistisin. Coin: {symbol}\n"
-        f"Veriler: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
+        f"Kripto Analisti. Coin: {symbol}\n"
+        f"Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
         f"{news_text}\n"
         f"GÖREV: Yatırımcıya işlem açması için net bir GİRİŞ, HEDEF (TP) ve STOP (SL) noktası ver."
     )
     headers = {'Content-Type': 'application/json'}
     
-    # GÜVENLİK FİLTRELERİNİ KAPAT (BLOCK_NONE) - Finansal tavsiye engelini aşar
+    # Sansür Engelleyici (Block None)
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "safetySettings": [
@@ -93,11 +93,17 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
         ]
     }
 
-    # SIRALAMA: Zeki -> Hızlı -> Sınırsız
+    # --- KAZANAN KADRO (V10.1) ---
     models = [
-        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),      # En Zeki (2 RPM Limiti Var)
-        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10),  # En Sağlam (15 RPM)
-        ("Gemini 1.5 Flash-8B", "gemini-1.5-flash-8b", 8) # YEDEK PARAŞÜT (Çok hızlı, asla takılmaz)
+        # 1. PRESTİJ (Gemini 1.5 Pro) - En zeki ama çabuk yorulur (Kota).
+        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),      
+        
+        # 2. KURTARICI (Gemini 2.0 Flash Exp) - V9.9'da çalışan kahraman model.
+        # Bu modelin kotası ayrıdır, Pro yorulsa bile bu çalışır.
+        ("Gemini 2.0 Flash Exp", "gemini-2.0-flash-exp", 15), 
+        
+        # 3. KALE (Gemini 1.5 Flash) - En eski ve sağlam model.
+        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10)
     ]
 
     last_error = ""
@@ -112,14 +118,13 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
                 raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
                 return clean_markdown(raw_text) + f"\n\n_(🧠 Model: {name})_"
             else:
-                # Hata kodunu kaydet (Örn: 429 = Kota Doldu)
-                last_error = f"Hata {resp.status_code}"
+                last_error = f"Kod {resp.status_code}"
                 continue
         except Exception as e:
             last_error = str(e)
             continue
             
-    return f"⚠️ Analiz Alınamadı. Sebep: {last_error}\n(Lütfen 1 dakika bekleyip tekrar deneyin)"
+    return f"⚠️ Analiz Alınamadı. Son Hata: {last_error}\n(Lütfen 1 dakika bekleyin, kota dolmuş olabilir)"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,7 +155,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title)
 
     final_text = (
-        f"💎 *{symbol} ULTRA ANALİZ (V10.0)* 💎\n\n"
+        f"💎 *{symbol} ULTRA ANALİZ (V10.1)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *RSI:* `{rsi:.2f}`\n"
         f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
@@ -166,7 +171,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V10.0 (LIMITLESS) ÇALIŞIYOR...")
+    print("🚀 BOT V10.1 (RESURRECTION) ÇALIŞIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
