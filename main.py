@@ -4,6 +4,7 @@ import ccxt
 import pandas as pd
 import requests
 from telegram import Update
+from telegram.request import HTTPXRequest
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
 import os
@@ -16,6 +17,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("❌ HATA: API Anahtarları Railway Variables kısmında eksik!")
 
+# Log ayarı
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Exchange Ayarı
@@ -38,14 +40,14 @@ def calculate_ema(series, period):
 def calculate_sma(series, period):
     return series.rolling(window=period).mean()
 
-# --- VERİ ÇEKME (ÇİFT MOTOR) ---
+# --- VERİ ÇEKME ---
 def fetch_data(symbol, timeframe='4h'):
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         return df
-    except Exception as e:
-        print(f"⚠️ CCXT Hatası: {e}, HTTP deneniyor...")
+    except:
+        pass # CCXT hata verirse sessizce geç
     
     try:
         base_url = "https://api.binance.com/api/v3/klines"
@@ -56,13 +58,13 @@ def fetch_data(symbol, timeframe='4h'):
         df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
         return df
     except Exception as e:
-        print(f"❌ HTTP Hatası: {e}")
+        print(f"❌ Veri Hatası: {e}")
         return None
 
 def fetch_news(symbol):
     coin_ticker = symbol.replace("USDT", "").upper()
     rss_url = f"https://cryptopanic.com/news/rss/currency/{coin_ticker}/"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(rss_url, headers=headers, timeout=5)
         if response.status_code == 200:
@@ -99,7 +101,7 @@ def analyze_market(symbol):
         "rsi_4h": rsi_4h, "rsi_15m": rsi_15m
     }
 
-# --- AI YORUMU (V8.7 - HIZLANDIRILMIŞ ZAMANLAMA) ---
+# --- AI YORUMU ---
 async def get_ai_comment(data, news):
     if news: news_text = "\n".join([f"- {n}" for n in news])
     else: news_text = "Haber yok."
@@ -116,11 +118,10 @@ async def get_ai_comment(data, news):
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # ZAMANLAMA AYARI: Burası çok önemli!
-    # Pro modeller max 15sn, Flash modeller max 8sn beklesin.
+    # Timeoutlar optimize edildi
     models = [
-        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview", 15),
-        ("Gemini 2.5 Pro", "gemini-2.5-pro", 15),
+        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview", 12),
+        ("Gemini 2.5 Pro", "gemini-2.5-pro", 12),
         ("Gemini 3.0 Flash Preview", "gemini-3-flash-preview", 8),
         ("Gemini 2.5 Flash", "gemini-2.5-flash", 8),
         ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite", 5)
@@ -128,45 +129,39 @@ async def get_ai_comment(data, news):
 
     for model_name, model_id, time_limit in models:
         try:
-            print(f"🧠 Deneniyor: {model_name} (Max {time_limit}sn)...") 
-            
+            print(f"🧠 {model_name} deneniyor...")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
             response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=time_limit)
             
             if response.status_code == 200:
-                print(f"✅ BAŞARILI: {model_name}")
+                print(f"✅ {model_name} Başarılı")
                 return response.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n_(👑 Analiz: {model_name})_"
             else:
-                print(f"❌ {model_name} Hata: {response.status_code}")
                 continue 
-        except Exception as e:
-            print(f"⚠️ {model_name} Pas Geçildi: {e}")
+        except Exception:
             continue
 
-    return "⚠️ HATA: Tüm modeller meşgul. Lütfen 1 dakika sonra tekrar deneyin."
+    return "⚠️ HATA: Tüm modeller meşgul veya kotanız doldu."
 
 # --- KOMUTLAR ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    # Bilgi Mesajı
-    await update.message.reply_text(f"🔍 {symbol} analizi başlatıldı. Sonuç birazdan geliyor...")
+    # Tek mesaj, düzenleme yok (Spam koruması için)
+    await update.message.reply_text(f"🔍 {symbol} analizi sıraya alındı, lütfen bekleyin...")
 
-    # Veri Çekme
     data = analyze_market(symbol)
     if not data:
-        return await update.message.reply_text("❌ Veri alınamadı (Binance Bağlantı Hatası).")
+        return await update.message.reply_text("❌ Veri alınamadı.")
     
     news = fetch_news(symbol)
-    
-    # AI Analizi
     ai_comment = await get_ai_comment(data, news)
     
     strength = "🔥 GÜÇLÜ" if abs(data['score']) >= 50 else "⚠️ ZAYIF"
 
     msg = (
-        f"💎 *{symbol} ANALİZ (V8.7 - Speed Tuned)*\n"
+        f"💎 *{symbol} ANALİZ (V8.8 - Conflict Fix)*\n"
         f"📊 Yön: {data['direction']}\n"
         f"🏆 Skor: {data['score']} {strength}\n"
         f"💵 Fiyat: {data['price']:.4f}\n\n"
@@ -174,10 +169,14 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Hedef: {data['tp']:.4f} | Stop: {data['sl']:.4f}"
     )
     
-    # Yeni mesaj olarak gönder
     await update.message.reply_text(msg, parse_mode='Markdown')
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # Telegram bağlantısını güçlendiren ayarlar
+    request = HTTPXRequest(connection_pool_size=8, read_timeout=20, write_timeout=20, connect_timeout=20)
+    
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request).build()
     app.add_handler(CommandHandler("incele", incele))
-    app.run_polling()
+    
+    print("🤖 Bot Başlatıldı...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
