@@ -1,4 +1,5 @@
 import logging
+import feedparser
 import ccxt
 import pandas as pd
 import requests
@@ -18,20 +19,23 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Borsa Ayarı
 exchange = ccxt.binance({
     'enableRateLimit': True,
     'options': {'defaultType': 'future'}
 })
 
-# --- VERİ ÇEKME ---
+# --- TEMİZLEYİCİ ---
+def clean_markdown(text):
+    if not text: return ""
+    return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+
+# --- 1. VERİ ---
 def fetch_data(symbol, timeframe='4h'):
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         return df
-    except:
-        pass
+    except: pass
     
     try:
         url = "https://api.binance.com/api/v3/klines"
@@ -40,12 +44,22 @@ def fetch_data(symbol, timeframe='4h'):
         data = resp.json()
         df = pd.DataFrame(data, columns=['t', 'open', 'high', 'low', 'close', 'v', 'ct', 'qv', 'n', 'tb', 'tq', 'i'])
         df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'v': float})
+        df.rename(columns={'v': 'volume'}, inplace=True)
         return df
-    except Exception as e:
-        print(f"❌ Veri Çekilemedi: {e}")
-        return None
+    except: return None
 
-# --- TEKNİK HESAPLAMA ---
+# --- 2. HABER ---
+def fetch_news(symbol):
+    try:
+        coin = symbol.replace("USDT", "").upper()
+        url = f"https://cryptopanic.com/news/rss/currency/{coin}/"
+        feed = feedparser.parse(url)
+        if feed.entries:
+            return clean_markdown(feed.entries[0].title)
+    except: return None
+    return None
+
+# --- 3. TEKNİK ---
 def calculate_indicators(df):
     if df is None: return 0, 0, 0
     close = df['close']
@@ -56,80 +70,95 @@ def calculate_indicators(df):
     ema_50 = close.ewm(span=50, adjust=False).mean()
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1]
 
-# --- AI MOTORU ---
-async def get_ai_comment(symbol, price, rsi, direction, score):
+# --- 4. AI MOTORU (GERÇEK EN İYİLER) ---
+async def get_ai_comment(symbol, price, rsi, direction, score, news_title):
+    news_text = f"Son Haber: {news_title}" if news_title else "Önemli haber yok."
+    
     prompt = (
-        f"Kripto Analisti gibi konuş. Coin: {symbol}. "
-        f"Fiyat: {price:.2f}, RSI: {rsi:.1f}, Yön: {direction}, Skor: {score}. "
-        f"Yatırımcılara kısa ve net bir strateji (Hedef/Stop) öner."
+        f"Dünyanın en iyi kripto analistisin. Coin: {symbol}\n"
+        f"Teknik: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction} (Skor {score})\n"
+        f"{news_text}\n"
+        f"GÖREV: Bu verileri yorumla.\n"
+        f"Yatırımcıya Net bir GİRİŞ seviyesi, Kar Al (TP) ve Zarar Kes (SL) noktası ver."
     )
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
+    # --- DÜZELTİLMİŞ VE DOĞRULANMIŞ LİSTE ---
+    # Gemini 2.5 diye bir şey yok. En iyisi 1.5 Pro'dur.
     models = [
-        ("Gemini 3.0 Pro", "gemini-3-pro-preview", 15),
-        ("Gemini Flash 3.0", "gemini-3-flash-preview", 10),
-        ("Gemini Flash 2.5", "gemini-2.5-flash", 10),
+        # 1. THE KING (En Zeki Model) - Biraz yavaştır ama en iyisidir.
+        ("Gemini 1.5 Pro", "gemini-1.5-pro", 20),
+        
+        # 2. THE CHALLENGER (Yeni Nesil Hızlı) - 1.5 Pro cevap vermezse bu bakar.
+        ("Gemini 2.0 Flash", "gemini-2.0-flash-exp", 15),
+        
+        # 3. THE TANK (Güvenli Liman) - Asla yarı yolda bırakmaz.
+        ("Gemini 1.5 Flash", "gemini-1.5-flash", 10),
     ]
 
     for name, model_id, timeout in models:
         try:
+            print(f"🧠 Deneniyor: {name}...") 
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
             resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=timeout)
+            
             if resp.status_code == 200:
-                # Gelen metni temizlemiyoruz, direkt ham haliyle döndürüyoruz
-                return resp.json()['candidates'][0]['content']['parts'][0]['text'] + f"\n\n(Model: {name})"
+                raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
+                return clean_markdown(raw_text) + f"\n\n_(🧠 Analiz: {name})_"
+            else:
+                continue
         except:
             continue
-    return "AI Servisi Meşgul."
+            
+    return "⚠️ Modeller şu an aşırı yoğun."
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("Kullanım: /incele BTCUSDT")
+    if not context.args: return await update.message.reply_text("❌ Kullanım: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    # Adım 1: Başlangıç
-    msg = await update.message.reply_text(f"🔍 {symbol} taranıyor... (V9.2)")
+    msg = await update.message.reply_text(f"🔍 *{symbol}* için Piyasa Profesörü (1.5 Pro) çağrılıyor...", parse_mode='Markdown')
 
-    # Adım 2: Veri
     df = fetch_data(symbol)
-    if df is None:
-        return await msg.edit_text("❌ Veri Hatası!")
+    if df is None: return await msg.edit_text("❌ Veri Hatası!")
     
-    # Kullanıcıya ilerlemeyi göster
-    try:
-        await msg.edit_text(f"✅ Veri çekildi. AI düşüncesi alınıyor...")
-    except: pass # Hata verirse takılma, devam et
-
     price, rsi, ema = calculate_indicators(df)
+    news_title = fetch_news(symbol)
+    
     score = 0
     if price > ema: score += 20
     if rsi < 30: score += 30
     elif rsi > 70: score -= 30
-    direction = "YUKSELIS" if score > 0 else "DUSUS"
+    
+    if score >= 30: direction_icon, direction_text = "🚀", "GÜÇLÜ AL"
+    elif score > 0: direction_icon, direction_text = "🟢", "AL"
+    elif score > -30: direction_icon, direction_text = "🔴", "SAT"
+    else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    # Adım 3: AI
-    comment = await get_ai_comment(symbol, price, rsi, direction, score)
+    try: await msg.edit_text(f"✅ Veri Hazır. Derin analiz yapılıyor (Biraz sürebilir)...")
+    except: pass
 
-    # Adım 4: SONUÇ (SÜSLEMESİZ - SAF METİN)
-    # Yıldız (*) veya Alt çizgi (_) kullanmadan düz metin oluşturuyoruz.
+    comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title)
+
     final_text = (
-        f"ANALIZ RAPORU: {symbol} (V9.2)\n"
-        f"Yon: {direction}\n"
-        f"Skor: {score}\n"
-        f"Fiyat: {price:.4f}\n"
-        f"RSI: {rsi:.2f}\n\n"
-        f"AI YORUMU:\n{comment}"
+        f"💎 *{symbol} PREMIUM ANALİZ* 💎\n\n"
+        f"💰 *Fiyat:* `{price:.4f}` $\n"
+        f"📊 *RSI:* `{rsi:.2f}`\n"
+        f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
+        f"───────────────────\n"
+        f"📰 *Haber:* {news_title if news_title else 'Nötr'}\n"
+        f"───────────────────\n\n"
+        f"🧠 *Uzman Görüşü:*\n{comment}"
     )
     
-    # parse_mode KULLANMIYORUZ! (Hata riskini sıfırlar)
     try:
-        await msg.edit_text(final_text)
+        await msg.edit_text(final_text, parse_mode='Markdown')
     except:
-        await update.message.reply_text(final_text)
+        await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("BOT V9.2 CALISIYOR...")
+    print("🚀 BOT V9.9 (REALITY CHECK) ÇALIŞIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling()
