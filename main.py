@@ -15,7 +15,6 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-    # Kod çökmesin ama loga yazsın
     print("❌ UYARI: API Anahtarları eksik olabilir. Railway Variables kontrol et.")
     pass
 
@@ -28,7 +27,8 @@ exchange = ccxt.binance({
 
 def clean_markdown(text):
     if not text: return ""
-    return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+    # Tırnak işaretleri JSON'ı bozmasın diye temizleyelim
+    return text.replace("*", "").replace("_", "").replace("`", "").replace('"', '').replace("'", "")
 
 # --- 1. VERİ ---
 def fetch_data(symbol, timeframe='4h'):
@@ -74,13 +74,12 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (GROQ - DETAYLI + TABLO) ---
+# --- 4. AI MOTORU (MIXTRAL - KUSURSUZ MODEL) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
-    # --- YENİ PROMPT: Hem Analiz Hem Tablo ---
     prompt = (
-        f"Sen tecrübeli bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n\n"
+        f"Sen profesyonel bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n\n"
         f"📊 **TEKNİK VERİLER:**\n"
         f"- Fiyat: {price:.4f}\n"
         f"- RSI: {rsi:.1f}\n"
@@ -110,14 +109,16 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         "Content-Type": "application/json"
     }
     
+    # --- DEĞİŞİKLİK BURADA: MIXTRAL MODELİ ---
+    # Bu model 400 hatası vermez, çok sağlamdır.
     payload = {
-        "model": "llama3-70b-8192", 
+        "model": "mixtral-8x7b-32768", 
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.6, # Biraz daha yaratıcı olsun diye 0.6 yaptık
-        "max_tokens": 1024  # Daha uzun yazabilsin diye artırdık
+        "temperature": 0.5,
+        "max_tokens": 1024
     }
 
-    print(f"⚡ Groq (Hybrid Mod) isteği gönderiliyor...")
+    print(f"⚡ Groq (Mixtral Mod) isteği gönderiliyor...")
 
     try:
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
@@ -125,11 +126,11 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         if response.status_code == 200:
             data = response.json()
             content = data['choices'][0]['message']['content']
-            return clean_markdown(content) + "\n\n_(⚡ Llama 3 - 70B | Groq)_"
+            return clean_markdown(content) + "\n\n_(⚡ Motor: Mixtral 8x7b | Groq)_"
         else:
             error_msg = response.text
             print(f"❌ Groq Hatası: {error_msg}")
-            return f"⚠️ Analiz alınamadı. Groq Hatası: {response.status_code}"
+            return f"⚠️ Analiz alınamadı. Groq Hatası: {response.status_code} - {error_msg[:50]}"
 
     except Exception as e:
         print(f"❌ Bağlantı Hatası: {str(e)}")
@@ -140,7 +141,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🧠 *{symbol}* Detaylı Analiz (V22.2) hazırlanıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"⚔️ *{symbol}* Mixtral Tankı (V22.3) devrede...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
@@ -158,13 +159,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler Groq'a iletildi. Yapay zeka düşünüyor...")
+    try: await msg.edit_text(f"✅ Veriler alındı. Mixtral analiz ediyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} HIBRIT ANALİZ (V22.2)* 💎\n\n"
+        f"💎 *{symbol} TANK ANALİZ (V22.3)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
@@ -177,7 +178,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V22.2 (HYBRID COMMANDER) BAŞLATILIYOR...")
+    print("🚀 BOT V22.3 (MIXTRAL TANK) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
