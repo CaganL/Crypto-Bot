@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import time
+import random
 from datetime import datetime
 
 # --- GÜVENLİK ---
@@ -24,7 +25,7 @@ if not TELEGRAM_TOKEN or not API_KEYS:
     print("❌ HATA: API Anahtarları EKSİK!")
     sys.exit(1)
 
-print(f"✅ V18.7 GRANDMASTER: {len(API_KEYS)} anahtar ile Efsane Kadro sahada.")
+print(f"✅ V19.0 HAYALET MOD: {len(API_KEYS)} anahtar ile sessizce çalışıyor.")
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
 
@@ -95,7 +96,7 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (EFSANE KADRO + MATRIX DÖNGÜSÜ) ---
+# --- 4. AI MOTORU (AZ AMA ÖZ - STEALTH) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
@@ -110,58 +111,64 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # --- V17.0'IN EFSANE KADROSU (Önem Sırasına Göre) ---
-    models = [
-        ("Gemini 2.5 Pro", "gemini-2.5-pro"),           # 1. En İyisi
-        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview"), # 2. Deneysel Deha
-        ("Gemini 2.5 Flash", "gemini-2.5-flash"),       # 3. Yeni Hızlı
-        ("Gemini 2.0 Flash", "gemini-2.0-flash"),       # 4. Standart Hızlı
-        ("Gemini Flash Latest", "gemini-flash-latest")  # 5. Yedek Güç
-    ]
+    # --- STRATEJİK ATIŞ PLANI ---
+    # Her anahtara özel, en güvenli modeli atadık.
+    # Bu liste sadece 3 kez döner. 15 kez değil.
+    attempts = []
+    
+    # 1. Atış: Anahtar 1 ile En Yeni Flash (Hızlı)
+    if len(API_KEYS) > 0: attempts.append((API_KEYS[0], "gemini-2.0-flash"))
+    
+    # 2. Atış: Anahtar 2 ile En Sağlam Flash (Güvenli)
+    if len(API_KEYS) > 1: attempts.append((API_KEYS[1], "gemini-1.5-flash"))
+    
+    # 3. Atış: Anahtar 3 ile Yedek Flash (Son Çare)
+    if len(API_KEYS) > 2: attempts.append((API_KEYS[2], "gemini-flash-latest"))
+    
+    # Eğer sadece 1 anahtar varsa, aynı anahtarla farklı modelleri ekle
+    if len(API_KEYS) == 1:
+        attempts.append((API_KEYS[0], "gemini-1.5-flash"))
 
     last_error = ""
 
-    # --- MATRIX DÖNGÜSÜ: Önce Model, Sonra Anahtarlar ---
-    for name, model_id in models:
-        print(f"🧠 MODEL DENENİYOR: {name} (Tüm anahtarlarda aranacak...)")
+    for i, (api_key, model_id) in enumerate(attempts):
+        key_short = f"...{api_key[-4:]}"
+        print(f"🕵️‍♂️ [Deneme {i+1}/3] {model_id} deneniyor (Key: {key_short})...")
         
-        for api_key in API_KEYS:
-            key_short = f"...{api_key[-4:]}"
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
+            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
             
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
-                # Timeout 10 saniye ideal
-                resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
-                
-                if resp.status_code == 200:
-                    raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
-                    # Başarı!
-                    return clean_markdown(raw_text) + f"\n\n_(🧠 {name} | 🔑 {key_short})_"
-                
-                elif resp.status_code == 429:
-                    print(f"  ❌ {key_short} -> {name} KOTA DOLU. (Anahtar değişiyor)")
-                    last_error = f"{name}: Kota Dolu"
-                    continue # Sıradaki anahtarı dene
-                
-                else:
-                    print(f"  ⚠️ {key_short} -> Hata: {resp.status_code}")
-                    last_error = f"Hata {resp.status_code}"
-                    continue
-                    
-            except Exception as e:
-                last_error = str(e)
+            if resp.status_code == 200:
+                raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
+                return clean_markdown(raw_text) + f"\n\n_(⚡ {model_id} | 🔑 {key_short})_"
+            
+            elif resp.status_code == 429:
+                print(f"  🛑 Kota Dolu ({model_id}). Soğumaya bırakılıyor...")
+                last_error = "Kota Dolu"
+                # ÇOK ÖNEMLİ: Google'ı kızdırmamak için 3 saniye bekle
+                time.sleep(3) 
                 continue
-        
-        # Eğer bu model 3 anahtarda da çalışmadıysa, döngü bir sonraki modele (örn: 3.0 Pro'ya) geçer.
+            
+            else:
+                print(f"  ⚠️ Hata: {resp.status_code}")
+                last_error = f"Hata {resp.status_code}"
+                time.sleep(2)
+                continue
+                
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(2)
+            continue
 
-    return f"⚠️ Analiz başarısız. Tüm modeller ({len(models)} adet) ve tüm anahtarlar ({len(API_KEYS)} adet) denendi. Hata: {last_error}"
+    return f"⚠️ Analiz alınamadı. (Tüm güvenli denemeler başarısız). Lütfen 10 dk bekleyin.\nSon Hata: {last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🚀 *{symbol}* için Büyük Usta (V18.7) devrede...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"👻 *{symbol}* Hayalet Mod (V19.0) ile taranıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -179,13 +186,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler alındı. Pro modeller zorlanıyor...")
+    try: await msg.edit_text(f"✅ Veriler hazır. Sessizce analiz alınıyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} GRANDMASTER ANALİZ (V18.7)* 💎\n\n"
+        f"💎 *{symbol} STEALTH ANALİZ (V19.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
         f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
@@ -202,7 +209,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print(f"🚀 BOT V18.7 (GRANDMASTER) ÇALIŞIYOR... ({len(API_KEYS)} Key Aktif)")
+    print(f"🚀 BOT V19.0 (STEALTH MODE) ÇALIŞIYOR... ({len(API_KEYS)} Key Aktif)")
     sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
