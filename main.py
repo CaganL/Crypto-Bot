@@ -12,16 +12,12 @@ import json
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Anahtarları topla
-API_KEYS = []
-if os.getenv("GEMINI_API_KEY"): API_KEYS.append(os.getenv("GEMINI_API_KEY"))
-if os.getenv("GEMINI_API_KEY_2"): API_KEYS.append(os.getenv("GEMINI_API_KEY_2"))
-if os.getenv("GEMINI_API_KEY_3"): API_KEYS.append(os.getenv("GEMINI_API_KEY_3"))
-
-if not TELEGRAM_TOKEN or not API_KEYS:
-    print("❌ HATA: API Anahtarları EKSİK!")
-    sys.exit(1)
+if not TELEGRAM_TOKEN or not GROQ_API_KEY:
+    # Kod çökmesin ama loga yazsın
+    print("❌ UYARI: API Anahtarları eksik olabilir. Railway Variables kontrol et.")
+    pass
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
 
@@ -78,82 +74,73 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (V21.0 - MANUEL REST API) ---
-# Kütüphane kullanmaz, direkt adrese teslim eder.
+# --- 4. AI MOTORU (GROQ - DETAYLI + TABLO) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
+    # --- YENİ PROMPT: Hem Analiz Hem Tablo ---
     prompt = (
-        f"Kripto Analistisin. Coin: {symbol}\n"
-        f"ANLIK: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
-        f"GENİŞ AÇI: Dip {macro_low:.4f} | Tepe {macro_high:.4f}\n"
-        f"MUM GEÇMİŞİ:\n{history_str}\n"
-        f"{news_text}\n"
-        f"GÖREV: Teknik analiz yap. Destek/Direnç ver. Yatırım tavsiyesi vermeden strateji oluştur."
+        f"Sen tecrübeli bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n\n"
+        f"📊 **TEKNİK VERİLER:**\n"
+        f"- Fiyat: {price:.4f}\n"
+        f"- RSI: {rsi:.1f}\n"
+        f"- Trend Sinyali: {direction}\n"
+        f"- Ana Destek: {macro_low:.4f}\n"
+        f"- Ana Direnç: {macro_high:.4f}\n"
+        f"- Haber: {news_text}\n\n"
+        f"🕯️ **MUM HAREKETLERİ:**\n{history_str}\n\n"
+        f"⚡ **GÖREVİN:**\n"
+        f"1. **PİYASA YORUMU:** Önce grafikte gördüklerini, mum formasyonlarını ve piyasa psikolojisini detaylıca açıkla (3-4 cümle). Yatırımcıya ne olup bittiğini anlat.\n"
+        f"2. **STRATEJİ TABLOSU:** Ardından net rakamlarla aşağıdaki tabloyu doldur.\n\n"
+        f"Formatın tam olarak şöyle olsun (Türkçe):\n\n"
+        f"📝 **PİYASA ANALİZİ:**\n"
+        f"(Buraya detaylı yorumunu yaz...)\n\n"
+        f"🎯 **İŞLEM KURULUMU:**\n"
+        f"🔵 **GİRİŞ:** (Net fiyat)\n"
+        f"🟢 **TP1:** (Kar al 1)\n"
+        f"🟢 **TP2:** (Kar al 2)\n"
+        f"🔴 **STOP:** (Zarar kes)\n"
+        f"⚠️ **RİSK:** (Kısa uyarı)"
     )
 
-    # Denenecek Modellerin ADRESLERİ (Kütüphanesiz)
-    models = [
-        "gemini-1.5-flash", 
-        "gemini-1.5-pro",
-        "gemini-pro"
-    ]
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "llama3-70b-8192", 
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.6, # Biraz daha yaratıcı olsun diye 0.6 yaptık
+        "max_tokens": 1024  # Daha uzun yazabilsin diye artırdık
+    }
 
-    last_error = ""
+    print(f"⚡ Groq (Hybrid Mod) isteği gönderiliyor...")
 
-    for model_name in models:
-        print(f"🌍 Manuel İstek: {model_name} deneniyor...")
+    try:
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
         
-        for api_key in API_KEYS:
-            key_short = f"...{api_key[-4:]}"
-            
-            # Google'ın Resmi REST API Adresi (Manuel)
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-            
-            headers = {'Content-Type': 'application/json'}
-            data = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-            }
+        if response.status_code == 200:
+            data = response.json()
+            content = data['choices'][0]['message']['content']
+            return clean_markdown(content) + "\n\n_(⚡ Llama 3 - 70B | Groq)_"
+        else:
+            error_msg = response.text
+            print(f"❌ Groq Hatası: {error_msg}")
+            return f"⚠️ Analiz alınamadı. Groq Hatası: {response.status_code}"
 
-            try:
-                # 30 Saniye Timeout (Ne az ne çok)
-                response = await asyncio.to_thread(requests.post, url, headers=headers, json=data, timeout=30)
-                
-                if response.status_code == 200:
-                    result_json = response.json()
-                    # Cevabı ayıkla
-                    if 'candidates' in result_json and result_json['candidates']:
-                        raw_text = result_json['candidates'][0]['content']['parts'][0]['text']
-                        return clean_markdown(raw_text) + f"\n\n_(⚡ Manuel API: {model_name} | 🔑 {key_short})_"
-                
-                elif response.status_code == 429:
-                    print(f"  🛑 Kota Dolu ({model_name} - {key_short})")
-                    last_error = "Kota Dolu"
-                else:
-                    # Hatayı ekrana bas ki görelim
-                    error_msg = response.text
-                    print(f"  ⚠️ Hata {response.status_code}: {error_msg}")
-                    last_error = f"Kod {response.status_code}: {error_msg[:50]}..."
-                    
-            except Exception as e:
-                print(f"  ⚠️ Bağlantı Hatası: {str(e)}")
-                last_error = str(e)
-                continue
-
-    return f"⚠️ Analiz başarısız. Google sunucularından cevap alınamadı.\nSon Hata: {last_error}"
+    except Exception as e:
+        print(f"❌ Bağlantı Hatası: {str(e)}")
+        return f"⚠️ Bağlantı hatası: {str(e)}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"⚡ *{symbol}* Manuel API (V21.0) ile taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🧠 *{symbol}* Detaylı Analiz (V22.2) hazırlanıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
@@ -171,17 +158,17 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Bağlantı kuruldu. Cevap bekleniyor...")
+    try: await msg.edit_text(f"✅ Veriler Groq'a iletildi. Yapay zeka düşünüyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} V21.0 ANALİZ* 💎\n\n"
+        f"💎 *{symbol} HIBRIT ANALİZ (V22.2)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
-        f"🧠 *AI Yorumu:*\n{comment}"
+        f"{comment}"
     )
     
     try:
@@ -190,7 +177,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V21.0 (MANUEL API) BAŞLATILIYOR...")
+    print("🚀 BOT V22.2 (HYBRID COMMANDER) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
