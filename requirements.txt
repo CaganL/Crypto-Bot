@@ -3,4 +3,3 @@ pandas
 ccxt
 feedparser
 requests
-google-generativeai>=0.7.2
