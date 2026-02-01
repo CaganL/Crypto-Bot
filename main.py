@@ -2,14 +2,13 @@ import logging
 import feedparser
 import ccxt
 import pandas as pd
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
 import os
 import sys
-import time
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+import json
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -79,7 +78,8 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (V20.1 - MULTI-MODEL SDK) ---
+# --- 4. AI MOTORU (V21.0 - MANUEL REST API) ---
+# Kütüphane kullanmaz, direkt adrese teslim eder.
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
@@ -92,63 +92,68 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         f"GÖREV: Teknik analiz yap. Destek/Direnç ver. Yatırım tavsiyesi vermeden strateji oluştur."
     )
 
-    safety_settings = {
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-    }
-
-    # Google'ın tanıması muhtemel modeller listesi
-    # 404 hatası almamak için sırayla dener
-    models_to_try = [
-        "gemini-1.5-flash",    # En yenisi
-        "gemini-1.5-pro",      # En zekisi
-        "gemini-1.0-pro",      # En eskisi (Garanti çalışır)
-        "gemini-pro"           # Klasik isim
+    # Denenecek Modellerin ADRESLERİ (Kütüphanesiz)
+    models = [
+        "gemini-1.5-flash", 
+        "gemini-1.5-pro",
+        "gemini-pro"
     ]
 
     last_error = ""
 
-    # Tüm modelleri ve anahtarları kombine edip deniyoruz
-    for model_name in models_to_try:
-        print(f"🧠 Model deneniyor: {model_name}...")
+    for model_name in models:
+        print(f"🌍 Manuel İstek: {model_name} deneniyor...")
         
         for api_key in API_KEYS:
             key_short = f"...{api_key[-4:]}"
             
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel(model_name)
-                
-                # İsteği atıyoruz
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    prompt,
-                    safety_settings=safety_settings
-                )
-                
-                if response.text:
-                    return clean_markdown(response.text) + f"\n\n_(🛡️ SDK: {model_name} | 🔑 {key_short})_"
+            # Google'ın Resmi REST API Adresi (Manuel)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             
-            except Exception as e:
-                # 404 hatası gelirse (model bulunamadı) diğer modele geçmek için sessiz kalıyoruz
-                error_msg = str(e)
-                if "404" in error_msg or "not found" in error_msg:
-                    print(f"  ❌ {model_name} bulunamadı. Sıradakine geçiliyor.")
+            headers = {'Content-Type': 'application/json'}
+            data = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                ]
+            }
+
+            try:
+                # 30 Saniye Timeout (Ne az ne çok)
+                response = await asyncio.to_thread(requests.post, url, headers=headers, json=data, timeout=30)
+                
+                if response.status_code == 200:
+                    result_json = response.json()
+                    # Cevabı ayıkla
+                    if 'candidates' in result_json and result_json['candidates']:
+                        raw_text = result_json['candidates'][0]['content']['parts'][0]['text']
+                        return clean_markdown(raw_text) + f"\n\n_(⚡ Manuel API: {model_name} | 🔑 {key_short})_"
+                
+                elif response.status_code == 429:
+                    print(f"  🛑 Kota Dolu ({model_name} - {key_short})")
+                    last_error = "Kota Dolu"
                 else:
-                    print(f"  ⚠️ Hata ({model_name} - {key_short}): {error_msg}")
-                    last_error = error_msg
+                    # Hatayı ekrana bas ki görelim
+                    error_msg = response.text
+                    print(f"  ⚠️ Hata {response.status_code}: {error_msg}")
+                    last_error = f"Kod {response.status_code}: {error_msg[:50]}..."
+                    
+            except Exception as e:
+                print(f"  ⚠️ Bağlantı Hatası: {str(e)}")
+                last_error = str(e)
                 continue
 
-    return f"⚠️ Analiz başarısız. Google SDK bağlantısı kuruldu ama model hatası alındı.\nSon Hata: {last_error}"
+    return f"⚠️ Analiz başarısız. Google sunucularından cevap alınamadı.\nSon Hata: {last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🛡️ *{symbol}* Google SDK V20.1 (Fixer) devrede...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"⚡ *{symbol}* Manuel API (V21.0) ile taranıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
@@ -166,13 +171,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Google Sunucusuna Girildi. Model seçiliyor...")
+    try: await msg.edit_text(f"✅ Bağlantı kuruldu. Cevap bekleniyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} SDK ANALİZ (V20.1)* 💎\n\n"
+        f"💎 *{symbol} V21.0 ANALİZ* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
@@ -185,7 +190,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V20.1 (FIXER) BAŞLATILIYOR...")
+    print("🚀 BOT V21.0 (MANUEL API) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
