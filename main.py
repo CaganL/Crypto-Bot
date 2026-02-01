@@ -24,9 +24,14 @@ if not TELEGRAM_TOKEN or not API_KEYS:
     print("❌ HATA: API Anahtarları EKSİK!")
     sys.exit(1)
 
-print(f"✅ V19.2 FAIL-FAST MOD: {len(API_KEYS)} anahtar ile çalışıyor.")
+# Logları temizle
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
+print(f"✅ V19.3 TEMİZLİKÇİ MOD: {len(API_KEYS)} anahtar ile başlatılıyor.")
 
 exchange = ccxt.binance({
     'enableRateLimit': True,
@@ -43,18 +48,6 @@ def fetch_data(symbol, timeframe='4h'):
     try:
         bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df
-    except: pass
-    
-    try:
-        url = "https://api.binance.com/api/v3/klines"
-        params = {'symbol': symbol, 'interval': timeframe, 'limit': 100}
-        resp = requests.get(url, params=params, timeout=10)
-        data = resp.json()
-        df = pd.DataFrame(data, columns=['t', 'open', 'high', 'low', 'close', 'v', 'ct', 'qv', 'n', 'tb', 'tq', 'i'])
-        df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'v': float})
-        df.rename(columns={'v': 'volume', 't': 'timestamp'}, inplace=True)
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
     except: return None
@@ -95,78 +88,69 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (ACIMASIZ ZAMANLAYICI) ---
+# --- 4. AI MOTORU (TEK MODEL - GARANTİ SONUÇ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
         f"Kripto Analistisin. Coin: {symbol}\n"
         f"ANLIK: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
-        f"GENİŞ AÇI (16 Gün): Dip {macro_low:.4f} | Tepe {macro_high:.4f}\n\n"
-        f"YAKIN ÇEKİM (Son 48 Saat):\n{history_str}\n\n"
+        f"GENİŞ AÇI: Dip {macro_low:.4f} | Tepe {macro_high:.4f}\n"
+        f"SON DURUM:\n{history_str}\n"
         f"{news_text}\n"
-        f"GÖREV: Mum formasyonlarını incele, destek/dirençleri bul ve AL/SAT stratejisi oluştur."
+        f"GÖREV: Sadece teknik analize odaklan. Destek/Direnç ver. AL/SAT stratejisi kur."
     )
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    attempts = []
-    # En hızlı modeller
-    if len(API_KEYS) > 0: attempts.append((API_KEYS[0], "gemini-2.0-flash"))
-    if len(API_KEYS) > 1: attempts.append((API_KEYS[1], "gemini-1.5-flash"))
-    if len(API_KEYS) > 2: attempts.append((API_KEYS[2], "gemini-flash-latest"))
-    if len(API_KEYS) == 1: attempts.append((API_KEYS[0], "gemini-1.5-flash"))
-
+    # MACERA YOK! Sadece en stabil model: Gemini 1.5 Flash
+    # Bu model hem hızlıdır hem de 429 hatası en az verendir.
+    target_model = "gemini-1.5-flash"
+    
     last_error = ""
 
-    for i, (api_key, model_id) in enumerate(attempts):
+    # Sadece 3 deneme hakkı var (Her anahtar 1 kere)
+    for i, api_key in enumerate(API_KEYS):
         key_short = f"...{api_key[-4:]}"
-        print(f"🕵️‍♂️ [Deneme {i+1}/3] {model_id} (Key: {key_short})...")
+        print(f"🔄 [Deneme {i+1}] {target_model} deneniyor (Key: {key_short})...")
         
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={api_key}"
             
-            # --- KRİTİK AYAR: (Connect Timeout, Read Timeout) ---
-            # 5 saniyede bağlanamazsan iptal et.
-            # Bağlandıktan sonra 25 saniyede cevap gelmezse iptal et.
-            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=(5, 25))
+            # Timeout NET 30 saniye. Ne eksik ne fazla.
+            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=30)
             
             if resp.status_code == 200:
                 raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
-                return clean_markdown(raw_text) + f"\n\n_(⚡ {model_id} | 🔑 {key_short})_"
+                return clean_markdown(raw_text) + f"\n\n_(✅ {target_model} | Key: {key_short})_"
             
             elif resp.status_code == 429:
-                print(f"  🛑 Kota Dolu ({model_id}).")
+                print(f"  ⚠️ Kota Dolu (Key: {key_short}). Diğer anahtara geçiliyor.")
                 last_error = "Kota Dolu"
-                time.sleep(1) 
                 continue
             
             else:
-                print(f"  ⚠️ Hata: {resp.status_code}")
-                last_error = f"Hata {resp.status_code}"
-                time.sleep(1)
+                print(f"  ⚠️ HTTP Hata: {resp.status_code}")
+                last_error = f"Hata Kodu: {resp.status_code}"
                 continue
                 
-        except requests.exceptions.Timeout:
-            print(f"  ⏳ ZAMAN AŞIMI! (Google cevap vermedi)")
-            last_error = "Zaman Aşımı (Google Yavaş)"
-            continue
         except Exception as e:
-            print(f"  ⚠️ Bağlantı Hatası: {str(e)}")
-            last_error = str(e)
+            print(f"  ⚠️ Bağlantı Sorunu: {str(e)}")
+            last_error = "Google Yanıt Vermedi (Timeout)"
             continue
 
-    return f"⚠️ Analiz başarısız. Google sunucuları şu an aşırı yoğun veya yanıt vermiyor.\nSon Hata: {last_error}"
+    return f"⚠️ Analiz başarısız. Google sunucularına ulaşılamadı.\nSebep: {last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"⏱️ *{symbol}* taranıyor... (Max 30sn)", parse_mode='Markdown')
+    # Kullanıcıya anında cevap ver ki "Bot çalışıyor mu?" demesin
+    msg = await update.message.reply_text(f"🔍 *{symbol}* verileri çekiliyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
-    if df is None: return await msg.edit_text("❌ Veri Hatası!")
+    if df is None: return await msg.edit_text("❌ Borsa Verisi Alınamadı!")
     
     price, rsi, ema, macro_low, macro_high, history_str = calculate_indicators(df)
     news_title = fetch_news(symbol)
@@ -181,31 +165,31 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler gönderildi. Hızlı cevap bekleniyor...")
+    try: await msg.edit_text(f"🤖 Yapay Zeka Düşünüyor... (Max 30sn)")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} V19.2 ANALİZ* 💎\n\n"
+        f"💎 *{symbol} ANALİZ RAPORU (V19.3)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
-        f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
-        f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
-        f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
+        f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
-        f"📰 *Haber:* {news_title if news_title else 'Akış Sakin'}\n"
-        f"───────────────────\n\n"
-        f"🧠 *Strateji:*\n{comment}"
+        f"🧠 *AI Yorumu:*\n{comment}"
     )
     
     try:
         await msg.edit_text(final_text, parse_mode='Markdown')
     except:
+        # Mesaj düzenleme hatası olursa yeni mesaj at
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print(f"🚀 BOT V19.2 (FAIL-FAST) ÇALIŞIYOR... ({len(API_KEYS)} Key Aktif)")
-    sys.stdout.flush()
+    print("🚀 BOT BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
-    app.run_polling()
+    
+    # ÇOK ÖNEMLİ: drop_pending_updates=True
+    # Bu ayar, bot açılırken eski mesajları ve "Çakışan" bağlantıları siler.
+    print("🧹 Eski bağlantılar temizleniyor...")
+    app.run_polling(drop_pending_updates=True)
