@@ -25,7 +25,7 @@ if not TELEGRAM_TOKEN or not API_KEYS:
     print("❌ HATA: API Anahtarları EKSİK!")
     sys.exit(1)
 
-print(f"✅ V19.0 HAYALET MOD: {len(API_KEYS)} anahtar ile sessizce çalışıyor.")
+print(f"✅ V19.1 SABIRLI MOD: {len(API_KEYS)} anahtar ile çalışıyor.")
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
 
@@ -96,7 +96,7 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (AZ AMA ÖZ - STEALTH) ---
+# --- 4. AI MOTORU (SABIRLI VE GÜVENLİ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
@@ -111,43 +111,34 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # --- STRATEJİK ATIŞ PLANI ---
-    # Her anahtara özel, en güvenli modeli atadık.
-    # Bu liste sadece 3 kez döner. 15 kez değil.
+    # Sadece Güvenli Flash Modeller
     attempts = []
-    
-    # 1. Atış: Anahtar 1 ile En Yeni Flash (Hızlı)
     if len(API_KEYS) > 0: attempts.append((API_KEYS[0], "gemini-2.0-flash"))
-    
-    # 2. Atış: Anahtar 2 ile En Sağlam Flash (Güvenli)
     if len(API_KEYS) > 1: attempts.append((API_KEYS[1], "gemini-1.5-flash"))
-    
-    # 3. Atış: Anahtar 3 ile Yedek Flash (Son Çare)
     if len(API_KEYS) > 2: attempts.append((API_KEYS[2], "gemini-flash-latest"))
-    
-    # Eğer sadece 1 anahtar varsa, aynı anahtarla farklı modelleri ekle
-    if len(API_KEYS) == 1:
-        attempts.append((API_KEYS[0], "gemini-1.5-flash"))
+    if len(API_KEYS) == 1: attempts.append((API_KEYS[0], "gemini-1.5-flash"))
 
     last_error = ""
 
     for i, (api_key, model_id) in enumerate(attempts):
         key_short = f"...{api_key[-4:]}"
-        print(f"🕵️‍♂️ [Deneme {i+1}/3] {model_id} deneniyor (Key: {key_short})...")
+        print(f"🕵️‍♂️ [Deneme {i+1}/3] {model_id} bekleniyor (Key: {key_short})...")
         
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
-            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=10)
+            
+            # --- KRİTİK DEĞİŞİKLİK: Timeout süresini 60 saniyeye çıkardık ---
+            # AI'nın düşünmesi için ona zaman tanıyoruz.
+            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=60)
             
             if resp.status_code == 200:
                 raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
                 return clean_markdown(raw_text) + f"\n\n_(⚡ {model_id} | 🔑 {key_short})_"
             
             elif resp.status_code == 429:
-                print(f"  🛑 Kota Dolu ({model_id}). Soğumaya bırakılıyor...")
+                print(f"  🛑 Kota Dolu ({model_id}).")
                 last_error = "Kota Dolu"
-                # ÇOK ÖNEMLİ: Google'ı kızdırmamak için 3 saniye bekle
-                time.sleep(3) 
+                time.sleep(2) 
                 continue
             
             else:
@@ -157,18 +148,20 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
                 continue
                 
         except Exception as e:
+            # Timeout hatası buraya düşer
+            print(f"  ⏳ Zaman Aşımı veya Bağlantı Hatası: {str(e)}")
             last_error = str(e)
             time.sleep(2)
             continue
 
-    return f"⚠️ Analiz alınamadı. (Tüm güvenli denemeler başarısız). Lütfen 10 dk bekleyin.\nSon Hata: {last_error}"
+    return f"⚠️ Analiz alınamadı. Google yanıt vermekte çok gecikti veya hata oluştu.\nSon Hata: {last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"👻 *{symbol}* Hayalet Mod (V19.0) ile taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"⏳ *{symbol}* analiz ediliyor... (Cevap için 60sn beklenecek)", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -186,13 +179,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler hazır. Sessizce analiz alınıyor...")
+    try: await msg.edit_text(f"✅ Veriler gönderildi. Google'ın cevabı bekleniyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} STEALTH ANALİZ (V19.0)* 💎\n\n"
+        f"💎 *{symbol} V19.1 ANALİZ* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
         f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
@@ -209,7 +202,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print(f"🚀 BOT V19.0 (STEALTH MODE) ÇALIŞIYOR... ({len(API_KEYS)} Key Aktif)")
+    print(f"🚀 BOT V19.1 (PATIENT SNIPER) ÇALIŞIYOR... ({len(API_KEYS)} Key Aktif)")
     sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
