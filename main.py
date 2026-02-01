@@ -11,16 +11,11 @@ import sys
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# 3 Anahtarı da kullanıyoruz (Eski V17 tek anahtardı, bu daha güçlü)
-API_KEYS = []
-if os.getenv("GEMINI_API_KEY"): API_KEYS.append(os.getenv("GEMINI_API_KEY"))
-if os.getenv("GEMINI_API_KEY_2"): API_KEYS.append(os.getenv("GEMINI_API_KEY_2"))
-if os.getenv("GEMINI_API_KEY_3"): API_KEYS.append(os.getenv("GEMINI_API_KEY_3"))
-
-if not TELEGRAM_TOKEN or not API_KEYS:
-    print("❌ HATA: API Anahtarları EKSİK!")
-    sys.exit(1)
+if not TELEGRAM_TOKEN or not GROQ_API_KEY:
+    print("❌ UYARI: API Anahtarları eksik! Railway Variables kontrol et.")
+    pass
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
 
@@ -31,7 +26,7 @@ exchange = ccxt.binance({
 
 def clean_markdown(text):
     if not text: return ""
-    return text.replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
+    return text.replace("*", "").replace("_", "").replace("`", "").replace('"', '').replace("'", "")
 
 # --- 1. VERİ ---
 def fetch_data(symbol, timeframe='4h'):
@@ -48,8 +43,7 @@ def fetch_news(symbol):
         coin = symbol.replace("USDT", "").upper()
         url = f"https://cryptopanic.com/news/rss/currency/{coin}/"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
-        feed = feedparser.parse(response.content)
+        feed = feedparser.parse(url)
         if feed.entries:
             return clean_markdown(feed.entries[0].title)
     except: return None
@@ -78,68 +72,74 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (V17 - FLASH VERSİYON) ---
+# --- 4. AI MOTORU (V25.0 - V17 KLONU / GROQ ENGINE) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
-    # Orijinal V17 Prompt'u
+    # --- V17 STİLİ PROMPT ---
     prompt = (
-        f"Sen Kıdemli Kripto Analistisin. Coin: {symbol}\n"
-        f"ANLIK: Fiyat {price:.4f} | RSI {rsi:.1f} | Yön {direction}\n"
-        f"GENİŞ AÇI: Dip {macro_low:.4f} | Tepe {macro_high:.4f}\n"
-        f"MUM GEÇMİŞİ:\n{history_str}\n"
-        f"{news_text}\n"
-        f"GÖREV: Bana 'Sayın Yatırımcı' diye hitap et. Teknik analizi geniş açıdan yap. Tuzaklara dikkat çek. "
-        f"Net giriş, stop ve hedef noktaları ver. R/R oranını hesapla."
+        f"Sen Kıdemli bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n"
+        f"Tıpkı eski bir borsa kurdu gibi detaylı, temkinli ve öğretici konuşmalısın.\n\n"
+        f"📊 **VERİLER:**\n"
+        f"- Fiyat: {price:.4f}\n"
+        f"- RSI: {rsi:.1f} (30=Ucuz, 70=Pahalı)\n"
+        f"- Trend: {direction}\n"
+        f"- Ana Dip: {macro_low:.4f}\n"
+        f"- Ana Tepe: {macro_high:.4f}\n"
+        f"- Haber: {news_text}\n\n"
+        f"🕯️ **MUM GEÇMİŞİ:**\n{history_str}\n\n"
+        f"⚡ **GÖREVİN:**\n"
+        f"Aşağıdaki şablonu kullanarak Türkçe bir analiz yaz. Asla robot gibi kısa kesme, detay ver.\n\n"
+        f"**ŞABLON:**\n"
+        f"Sayın Yatırımcı,\n"
+        f"(Buraya genel piyasa psikolojisini ve RSI durumunu yorumla.)\n\n"
+        f"## 🔍 GENİŞ AÇI VE YAPISAL ANALİZ\n"
+        f"**Konumlandırma:** (Fiyat destekte mi dirençte mi?)\n"
+        f"**Momentum:** (RSI ve mumlar ne söylüyor? Yorgunluk var mı?)\n\n"
+        f"## ⚠️ RİSK VE TUZAK UYARISI\n"
+        f"(Yatırımcıyı olası bir 'Fakeout' veya ani düşüşe karşı uyar. Hangi seviye tehlikeli?)\n\n"
+        f"--- \n"
+        f"## 🛠️ TİCARET PLANI: {symbol} ({direction})\n\n"
+        f"| İŞLEM | SEVİYE | STRATEJİ |\n"
+        f"| :--- | :--- | :--- |\n"
+        f"| Giriş | (Fiyat Aralığı) | (Neden buradan?) |\n"
+        f"| Stop Loss | (Fiyat) | (Risk yönetimi) |\n"
+        f"| Hedef 1 (TP1) | (Fiyat) | (Güvenli kar al) |\n"
+        f"| Hedef 2 (TP2) | (Fiyat) | (Ana hedef) |\n\n"
+        f"### 🧠 Analist Notu (R/R Analizi):\n"
+        f"Bu işlemde Risk/Kazanç oranı şöyledir: (Burada matematiksel olarak hesapla. Örn: %5 stopa karşılık %15 kar hedefliyoruz, bu 1:3 oranında mantıklı bir işlemdir.)"
     )
-    headers = {'Content-Type': 'application/json'}
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    # BURAYI DEĞİŞTİRDİM: Flash modeli çok daha hızlıdır ve timeout yemez.
-    target_model = "gemini-1.5-flash"
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
-    last_error = ""
+    # Llama 3.3 - En akıllısı, V17'yi taklit edebilecek tek model.
+    payload = {
+        "model": "llama-3.3-70b-versatile", 
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.6, 
+        "max_tokens": 1500
+    }
 
-    for i, api_key in enumerate(API_KEYS):
-        key_short = f"...{api_key[-4:]}"
-        print(f"🔄 [V17.0] Gemini Flash deneniyor (Key: {key_short})...")
-        
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={api_key}"
-            
-            # Flash hızlı olduğu için 15sn yeter, fazlası Railway'i yorar
-            resp = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=15)
-            
-            if resp.status_code == 200:
-                raw_text = resp.json()['candidates'][0]['content']['parts'][0]['text']
-                return clean_markdown(raw_text) + f"\n\n_(🧠 Model: Gemini 1.5 Flash)_"
-            
-            elif resp.status_code == 429:
-                print(f"  ⚠️ Kota Dolu (Key: {key_short}). Diğerine geçiliyor.")
-                continue
-            
-            else:
-                error_msg = resp.text
-                print(f"  ⚠️ Hata: {resp.status_code}")
-                last_error = f"Google Hata Kodu: {resp.status_code}"
-                continue
-                
-        except Exception as e:
-            print(f"  ⚠️ Bağlantı Sorunu: {str(e)}")
-            last_error = "Zaman Aşımı (Timeout) - Railway IP Ban"
-            continue
-
-    return f"⚠️ V17.0 (Flash) Başarısız Oldu.\nSebep: {last_error}"
+    try:
+        response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 200:
+            content = response.json()['choices'][0]['message']['content']
+            return clean_markdown(content) + "\n\n_(🧠 Stil: V17.0 | Motor: Groq)_"
+        else:
+            return f"⚠️ Analiz Hatası: {response.text}"
+    except Exception as e:
+        return f"⚠️ Bağlantı Hatası: {str(e)}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🚀 *{symbol}* için V17.0 (Flash) çalıştırılıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"💎 *{symbol}* V17 Ruhu (V25.0) ile analiz ediliyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
-    if df is None: return await msg.edit_text("❌ Veri Yok!")
+    if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
     
     price, rsi, ema, macro_low, macro_high, history_str = calculate_indicators(df)
     news_title = fetch_news(symbol)
@@ -154,16 +154,20 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler Google'a gönderildi (Hızlı Mod). Bekleniyor...")
+    try: await msg.edit_text(f"✅ V17.0 promptu yüklendi. Groq analiz ediyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} V17.0 FLASH* 💎\n\n"
+        f"💎 *{symbol} FINAL ANALİZ (V25.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
-        f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
+        f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
+        f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
+        f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
+        f"📰 *Haber:* {news_title if news_title else 'Akış Sakin'}\n"
+        f"───────────────────\n\n"
         f"{comment}"
     )
     
@@ -173,7 +177,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V17.0 FLASH BAŞLATILIYOR...")
+    print("🚀 BOT V25.0 (V17 REBORN) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
