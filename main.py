@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-    print("❌ UYARI: API Anahtarları eksik olabilir. Railway Variables kontrol et.")
+    print("❌ UYARI: API Anahtarları eksik! Railway Variables kontrol et.")
     pass
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, force=True)
@@ -27,7 +27,6 @@ exchange = ccxt.binance({
 
 def clean_markdown(text):
     if not text: return ""
-    # Tırnak işaretleri JSON'ı bozmasın diye temizleyelim
     return text.replace("*", "").replace("_", "").replace("`", "").replace('"', '').replace("'", "")
 
 # --- 1. VERİ ---
@@ -74,32 +73,30 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (MIXTRAL - KUSURSUZ MODEL) ---
+# --- 4. AI MOTORU (LLAMA 3.3 VERSATILE - EN YENİ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
     prompt = (
-        f"Sen profesyonel bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n\n"
+        f"Sen profesyonel bir Kripto Analistisin. {symbol} grafiğini inceliyorsun.\n\n"
         f"📊 **TEKNİK VERİLER:**\n"
         f"- Fiyat: {price:.4f}\n"
         f"- RSI: {rsi:.1f}\n"
-        f"- Trend Sinyali: {direction}\n"
-        f"- Ana Destek: {macro_low:.4f}\n"
-        f"- Ana Direnç: {macro_high:.4f}\n"
+        f"- Trend: {direction}\n"
+        f"- Destek: {macro_low:.4f}\n"
+        f"- Direnç: {macro_high:.4f}\n"
         f"- Haber: {news_text}\n\n"
-        f"🕯️ **MUM HAREKETLERİ:**\n{history_str}\n\n"
-        f"⚡ **GÖREVİN:**\n"
-        f"1. **PİYASA YORUMU:** Önce grafikte gördüklerini, mum formasyonlarını ve piyasa psikolojisini detaylıca açıkla (3-4 cümle). Yatırımcıya ne olup bittiğini anlat.\n"
-        f"2. **STRATEJİ TABLOSU:** Ardından net rakamlarla aşağıdaki tabloyu doldur.\n\n"
-        f"Formatın tam olarak şöyle olsun (Türkçe):\n\n"
-        f"📝 **PİYASA ANALİZİ:**\n"
-        f"(Buraya detaylı yorumunu yaz...)\n\n"
-        f"🎯 **İŞLEM KURULUMU:**\n"
-        f"🔵 **GİRİŞ:** (Net fiyat)\n"
-        f"🟢 **TP1:** (Kar al 1)\n"
-        f"🟢 **TP2:** (Kar al 2)\n"
-        f"🔴 **STOP:** (Zarar kes)\n"
-        f"⚠️ **RİSK:** (Kısa uyarı)"
+        f"🕯️ **MUM GEÇMİŞİ:**\n{history_str}\n\n"
+        f"⚡ **GÖREV:**\n"
+        f"1. Piyasayı kısaca yorumla (Psikoloji ne durumda?).\n"
+        f"2. Aşağıdaki tabloyu doldur (Türkçe):\n\n"
+        f"📝 **ANALİZ:** (Yorumun)\n\n"
+        f"🎯 **İŞLEM PLANI:**\n"
+        f"🔵 **GİRİŞ:** (Fiyat)\n"
+        f"🟢 **TP1:** (Hedef 1)\n"
+        f"🟢 **TP2:** (Hedef 2)\n"
+        f"🔴 **STOP:** (Zarar Kes)\n"
+        f"⚠️ **NOT:** (Risk uyarısı)"
     )
 
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -109,16 +106,16 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         "Content-Type": "application/json"
     }
     
-    # --- DEĞİŞİKLİK BURADA: MIXTRAL MODELİ ---
-    # Bu model 400 hatası vermez, çok sağlamdır.
+    # --- MODEL DEĞİŞİKLİĞİ: LLAMA 3.3 ---
+    # Groq'un en sorunsuz ve en yeni modeli budur.
     payload = {
-        "model": "mixtral-8x7b-32768", 
+        "model": "llama-3.3-70b-versatile", 
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5,
         "max_tokens": 1024
     }
 
-    print(f"⚡ Groq (Mixtral Mod) isteği gönderiliyor...")
+    print(f"⚡ Groq (Llama 3.3 Versatile) isteği gönderiliyor...")
 
     try:
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
@@ -126,11 +123,13 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         if response.status_code == 200:
             data = response.json()
             content = data['choices'][0]['message']['content']
-            return clean_markdown(content) + "\n\n_(⚡ Motor: Mixtral 8x7b | Groq)_"
+            return clean_markdown(content) + "\n\n_(⚡ Llama 3.3 | Groq)_"
         else:
+            # HATA DETAYINI ALIYORUZ
             error_msg = response.text
             print(f"❌ Groq Hatası: {error_msg}")
-            return f"⚠️ Analiz alınamadı. Groq Hatası: {response.status_code} - {error_msg[:50]}"
+            # Kullanıcıya hatanın tamamını göster ki çözelim
+            return f"⚠️ Groq Hatası ({response.status_code}): {error_msg}"
 
     except Exception as e:
         print(f"❌ Bağlantı Hatası: {str(e)}")
@@ -141,7 +140,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"⚔️ *{symbol}* Mixtral Tankı (V22.3) devrede...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🦄 *{symbol}* Llama 3.3 (V23.0) ile taranıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
@@ -159,13 +158,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler alındı. Mixtral analiz ediyor...")
+    try: await msg.edit_text(f"✅ Veriler alındı. Analiz hazırlanıyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} TANK ANALİZ (V22.3)* 💎\n\n"
+        f"💎 *{symbol} ULTRA ANALİZ (V23.0)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"📊 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
         f"───────────────────\n"
@@ -178,7 +177,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V22.3 (MIXTRAL TANK) BAŞLATILIYOR...")
+    print("🚀 BOT V23.0 (LLAMA 3.3 FIX) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
