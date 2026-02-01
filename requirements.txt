@@ -1,6 +1,6 @@
 python-telegram-bot
+pandas
 ccxt
 feedparser
-pandas
-numpy
 requests
+google-generativeai
