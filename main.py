@@ -72,48 +72,48 @@ def calculate_indicators(df):
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (V25.0 - V17 KLONU / GROQ ENGINE) ---
+# --- 4. AI MOTORU (V25.3 - KADEMELİ PUANLAMA) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
-    # --- V17 STİLİ PROMPT ---
     prompt = (
         f"Sen Kıdemli bir Kripto Stratejistisin. {symbol} paritesini inceliyorsun.\n"
-        f"Tıpkı eski bir borsa kurdu gibi detaylı, temkinli ve öğretici konuşmalısın.\n\n"
-        f"📊 **VERİLER:**\n"
+        f"Senin farkın, piyasayı siyah-beyaz değil, gri tonlarıyla (kademeli) okumandır.\n\n"
+        f"📊 **TEKNİK VERİLER:**\n"
         f"- Fiyat: {price:.4f}\n"
-        f"- RSI: {rsi:.1f} (30=Ucuz, 70=Pahalı)\n"
+        f"- RSI: {rsi:.1f} (Kademeli Değerlendirme)\n"
+        f"- Sinyal Puanı: {score}/57 (Maksimum)\n"
         f"- Trend: {direction}\n"
         f"- Ana Dip: {macro_low:.4f}\n"
         f"- Ana Tepe: {macro_high:.4f}\n"
         f"- Haber: {news_text}\n\n"
-        f"🕯️ **MUM GEÇMİŞİ:**\n{history_str}\n\n"
+        f"🕯️ **MUM HAREKETLERİ:**\n{history_str}\n\n"
         f"⚡ **GÖREVİN:**\n"
-        f"Aşağıdaki şablonu kullanarak Türkçe bir analiz yaz. Asla robot gibi kısa kesme, detay ver.\n\n"
+        f"Aşağıdaki şablonu kullanarak Türkçe bir analiz yaz. V17 tarzında, 'Sayın Yatırımcı' diye başla.\n"
+        f"Eğer puan düşükse 'Henüz erken' de, yüksekse 'Fırsat' de.\n\n"
         f"**ŞABLON:**\n"
         f"Sayın Yatırımcı,\n"
-        f"(Buraya genel piyasa psikolojisini ve RSI durumunu yorumla.)\n\n"
+        f"(RSI ve Trend durumunu yorumla.)\n\n"
         f"## 🔍 GENİŞ AÇI VE YAPISAL ANALİZ\n"
-        f"**Konumlandırma:** (Fiyat destekte mi dirençte mi?)\n"
-        f"**Momentum:** (RSI ve mumlar ne söylüyor? Yorgunluk var mı?)\n\n"
+        f"**Konumlandırma:** (Fiyat nerede? Destek/Direnç?)\n"
+        f"**Momentum:** (Piyasa yorgun mu, istekli mi?)\n\n"
         f"## ⚠️ RİSK VE TUZAK UYARISI\n"
-        f"(Yatırımcıyı olası bir 'Fakeout' veya ani düşüşe karşı uyar. Hangi seviye tehlikeli?)\n\n"
+        f"(Olası tehlikeler ve fake hareketler)\n\n"
         f"--- \n"
         f"## 🛠️ TİCARET PLANI: {symbol} ({direction})\n\n"
         f"| İŞLEM | SEVİYE | STRATEJİ |\n"
         f"| :--- | :--- | :--- |\n"
-        f"| Giriş | (Fiyat Aralığı) | (Neden buradan?) |\n"
+        f"| Giriş | (Fiyat Aralığı) | (Gerekçe) |\n"
         f"| Stop Loss | (Fiyat) | (Risk yönetimi) |\n"
-        f"| Hedef 1 (TP1) | (Fiyat) | (Güvenli kar al) |\n"
+        f"| Hedef 1 (TP1) | (Fiyat) | (Kar al) |\n"
         f"| Hedef 2 (TP2) | (Fiyat) | (Ana hedef) |\n\n"
         f"### 🧠 Analist Notu (R/R Analizi):\n"
-        f"Bu işlemde Risk/Kazanç oranı şöyledir: (Burada matematiksel olarak hesapla. Örn: %5 stopa karşılık %15 kar hedefliyoruz, bu 1:3 oranında mantıklı bir işlemdir.)"
+        f"(İşlemin risk/kazanç oranını hesapla.)"
     )
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
-    # Llama 3.3 - En akıllısı, V17'yi taklit edebilecek tek model.
     payload = {
         "model": "llama-3.3-70b-versatile", 
         "messages": [{"role": "user", "content": prompt}],
@@ -125,7 +125,7 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
         response = await asyncio.to_thread(requests.post, url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
-            return clean_markdown(content) + "\n\n_(🧠 Stil: V17.0 | Motor: Groq)_"
+            return clean_markdown(content) + "\n\n_(🧠 V25.3: Hassas Terazi)_"
         else:
             return f"⚠️ Analiz Hatası: {response.text}"
     except Exception as e:
@@ -136,7 +136,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"💎 *{symbol}* V17 Ruhu (V25.0) ile analiz ediliyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"⚖️ *{symbol}* Kademeli Analiz (V25.3) yapılıyor...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Borsa Verisi Yok!")
@@ -145,26 +145,46 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     news_title = fetch_news(symbol)
     
     score = 0
-    if price > ema: score += 20
-    if rsi < 30: score += 30
-    elif rsi > 70: score -= 30
     
-    if score >= 30: direction_icon, direction_text = "🚀", "GÜÇLÜ AL"
-    elif score > 0: direction_icon, direction_text = "🟢", "AL"
-    elif score > -30: direction_icon, direction_text = "🔴", "SAT"
+    # 1. Trend Puanı (EMA) -> Maksimum 20 Puan
+    if price > ema: score += 20
+    
+    # 2. RSI Puanı (Kademeli/Gradient)
+    # --- ALIM BÖLGESİ ---
+    if rsi < 30: 
+        score += 30          # Tam Puan (Dip)
+    elif 30 <= rsi < 35:
+        score += 15          # Yarım Puan (Çok Yakın)
+    elif 35 <= rsi < 40:
+        score += 7           # Çeyrek Puan (Fırsat Başlıyor)
+
+    # --- SATIŞ BÖLGESİ ---
+    elif rsi > 70:
+        score -= 30          # Tam Puan (Tepe)
+    elif 65 < rsi <= 70:
+        score -= 15          # Yarım Puan (Riskli)
+    elif 60 < rsi <= 65:
+        score -= 7           # Çeyrek Puan (Uyarı)
+    
+    # Sinyal Yorumlama
+    if score >= 27: direction_icon, direction_text = "🚀", "GÜÇLÜ AL"
+    elif score >= 15: direction_icon, direction_text = "🟢", "AL"
+    elif score >= 7: direction_icon, direction_text = "👀", "TAKİBE AL (GİRİŞ ARANIYOR)"
+    elif score > -7: direction_icon, direction_text = "⚪", "NÖTR/BEKLE"
+    elif score > -15: direction_icon, direction_text = "⚠️", "DİKKAT (SATIŞ GELEBİLİR)"
+    elif score > -27: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ V17.0 promptu yüklendi. Groq analiz ediyor...")
+    try: await msg.edit_text(f"✅ Skor hesaplandı: {score}. Yapay zeka yazıyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} FINAL ANALİZ (V25.0)* 💎\n\n"
+        f"💎 *{symbol} HASSAS ANALİZ (V25.3)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
-        f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
-        f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
-        f"🧭 *Sinyal:* {direction_icon} *{direction_text}* (Skor: {score})\n"
+        f"📊 *Skor:* `{score}`\n"
+        f"🧭 *Sinyal:* {direction_icon} *{direction_text}*\n"
         f"───────────────────\n"
         f"📰 *Haber:* {news_title if news_title else 'Akış Sakin'}\n"
         f"───────────────────\n\n"
@@ -177,7 +197,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V25.0 (V17 REBORN) BAŞLATILIYOR...")
+    print("🚀 BOT V25.3 (GRADIENT SCORING) BAŞLATILIYOR...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
     app.run_polling(drop_pending_updates=True)
