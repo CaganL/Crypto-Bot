@@ -8,7 +8,8 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 import asyncio
 import os
 import sys
-import time  # <--- YENİ: Bekleme modülü eklendi
+import time
+from datetime import datetime
 
 # --- GÜVENLİK ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -83,12 +84,11 @@ def calculate_indicators(df):
     
     for index, row in last_candles.iterrows():
         time_str = row['timestamp'].strftime('%d/%m %H:%M')
-        # Daha net veri formatı
         history_str += f"* {time_str} -> Kapanış: {row['close']:.4f} | En Yüksek: {row['high']:.4f}\n"
 
     return close.iloc[-1], rsi.iloc[-1], ema_50.iloc[-1], macro_low, macro_high, history_str
 
-# --- 4. AI MOTORU (ANTI-SPAM ÖZELLİKLİ) ---
+# --- 4. AI MOTORU (SNIPER MODE: AZ VE ÖZ) ---
 async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro_low, macro_high, history_str):
     news_text = f"Haber: {news_title}" if news_title else "Haber Yok"
     
@@ -103,11 +103,15 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
+    # --- SADELEŞTİRİLMİŞ KADRO (KOTA DOSTU) ---
     models = [
-        ("Gemini 2.5 Pro", "gemini-2.5-pro"),
-        ("Gemini 3.0 Pro Preview", "gemini-3-pro-preview"),
-        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
+        # 1. Önce HIZLI olanı dene (Hata verme şansı düşük)
         ("Gemini 2.0 Flash", "gemini-2.0-flash"),
+        
+        # 2. Hızlı olmazsa ZEKİ olanı dene
+        ("Gemini 1.5 Pro", "gemini-1.5-pro"),
+        
+        # 3. O da olmazsa SON KALE (Senin kazandığın model)
         ("Gemini Flash Latest", "gemini-flash-latest")
     ]
 
@@ -123,21 +127,21 @@ async def get_ai_comment(symbol, price, rsi, direction, score, news_title, macro
                 return clean_markdown(raw_text) + f"\n\n_(🧠 Model: {name})_"
             else:
                 last_error += f"\n{name}: {resp.status_code}"
-                # ÖNEMLİ: Hata alınca 2 saniye bekle ki Google banlamasın
-                time.sleep(2) 
+                # Hata alınca 5 saniye bekle (Google sakinleşsin)
+                time.sleep(5) 
                 continue
         except: 
-            time.sleep(1)
+            time.sleep(2)
             continue
             
-    return f"⚠️ Analiz alınamadı (Kota dolu olabilir, 1 dk bekle). Detay:\n{last_error}"
+    return f"⚠️ Analiz alınamadı (Çok sık deneme yapıldı). Lütfen 10 dk bekleyin.\nDetay:\n{last_error}"
 
 # --- KOMUT ---
 async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return await update.message.reply_text("❌ Örnek: `/incele BTCUSDT`")
     symbol = context.args[0].upper()
     
-    msg = await update.message.reply_text(f"🔍 *{symbol}* detaylı taranıyor...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 *{symbol}* taranıyor (V17.3)...", parse_mode='Markdown')
 
     df = fetch_data(symbol)
     if df is None: return await msg.edit_text("❌ Veri Hatası!")
@@ -155,13 +159,13 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif score > -30: direction_icon, direction_text = "🔴", "SAT"
     else: direction_icon, direction_text = "🩸", "GÜÇLÜ SAT"
 
-    try: await msg.edit_text(f"✅ Veriler toplandı. Yapay zeka ile görüşülüyor...")
+    try: await msg.edit_text(f"✅ Veriler toplandı. Yapay zeka bekleniyor...")
     except: pass
 
     comment = await get_ai_comment(symbol, price, rsi, direction_text, score, news_title, macro_low, macro_high, history_str)
 
     final_text = (
-        f"💎 *{symbol} CRYSTAL ANALİZ (V17.2)* 💎\n\n"
+        f"💎 *{symbol} SNIPER ANALİZ (V17.3)* 💎\n\n"
         f"💰 *Fiyat:* `{price:.4f}` $\n"
         f"🌍 *Ana Dip:* `{macro_low:.4f}`\n"
         f"🏔️ *Ana Tepe:* `{macro_high:.4f}`\n"
@@ -178,7 +182,7 @@ async def incele(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(final_text.replace("*", "").replace("`", ""))
 
 if __name__ == '__main__':
-    print("🚀 BOT V17.2 (ANTI-SPAM) ÇALIŞIYOR...")
+    print("🚀 BOT V17.3 (SNIPER MODE) ÇALIŞIYOR...")
     sys.stdout.flush()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("incele", incele))
